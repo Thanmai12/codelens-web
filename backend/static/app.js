@@ -4,10 +4,13 @@ const fileNameEl = document.getElementById("file-name");
 const scanBtn = document.getElementById("scan-btn");
 const errorBox = document.getElementById("error-box");
 const loadingSection = document.getElementById("loading");
+const loadingText = document.getElementById("loading-text");
 const resultsSection = document.getElementById("results");
-const summaryCard = document.getElementById("summary-card");
+const summaryLine = document.getElementById("summary-line");
 
 let selectedFile = null;
+
+const LOADING_MESSAGES = ["Reading files", "Walking the tree", "Checking for secrets", "Scoring complexity"];
 
 dropzone.addEventListener("click", () => fileInput.click());
 
@@ -21,9 +24,7 @@ dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover
 dropzone.addEventListener("drop", (e) => {
   e.preventDefault();
   dropzone.classList.remove("dragover");
-  if (e.dataTransfer.files.length) {
-    handleFile(e.dataTransfer.files[0]);
-  }
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
 });
 
 fileInput.addEventListener("change", () => {
@@ -32,11 +33,11 @@ fileInput.addEventListener("change", () => {
 
 function handleFile(file) {
   if (!file.name.toLowerCase().endsWith(".zip")) {
-    showError("Please choose a .zip file.");
+    showError("That's not a .zip file. Choose a zipped project instead.");
     return;
   }
   selectedFile = file;
-  fileNameEl.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`;
+  fileNameEl.textContent = `${file.name} — ${(file.size / 1024).toFixed(0)} KB`;
   scanBtn.disabled = false;
   hideError();
 }
@@ -50,12 +51,21 @@ function hideError() {
   errorBox.hidden = true;
 }
 
+let loadingInterval = null;
+
 scanBtn.addEventListener("click", async () => {
   if (!selectedFile) return;
   hideError();
   resultsSection.hidden = true;
   loadingSection.hidden = false;
   scanBtn.disabled = true;
+
+  let msgIndex = 0;
+  loadingText.textContent = LOADING_MESSAGES[0];
+  loadingInterval = setInterval(() => {
+    msgIndex = (msgIndex + 1) % LOADING_MESSAGES.length;
+    loadingText.textContent = LOADING_MESSAGES[msgIndex];
+  }, 1400);
 
   const form = new FormData();
   form.append("project", selectedFile);
@@ -70,9 +80,12 @@ scanBtn.addEventListener("click", async () => {
       throw new Error(detail + filesNote);
     }
     renderResults(data);
+    dropzone.classList.add("snap");
+    setTimeout(() => dropzone.classList.remove("snap"), 400);
   } catch (err) {
     showError(err.message || "Something went wrong while scanning.");
   } finally {
+    clearInterval(loadingInterval);
     loadingSection.hidden = true;
     scanBtn.disabled = false;
   }
@@ -81,69 +94,76 @@ scanBtn.addEventListener("click", async () => {
 function renderResults(data) {
   const { summary, issues, parse_errors, files_scanned, files_list, debug } = data;
 
-  summaryCard.innerHTML = `
-    ${stat(files_scanned ?? "?", "Files scanned")}
-    ${stat(summary.total, "Total")}
-    ${stat(summary.security, "Security")}
-    ${stat(summary.quality, "Quality")}
-    ${stat(summary.critical, "Critical")}
-    ${stat(summary.error, "Error")}
-    ${stat(summary.warning, "Warning")}
-    ${stat(summary.info, "Info")}
-  `;
+  let html = `<span class="big">${summary.total}</span> issue${summary.total === 1 ? "" : "s"} found: `
+    + `<span class="big">${summary.security}</span> security, <span class="big">${summary.quality}</span> quality`
+    + (summary.critical ? `, <span class="big" style="color:var(--critical)">${summary.critical}</span> critical` : "") + ".";
 
+  if (files_scanned !== undefined) {
+    html += `<br><span style="color:var(--muted)">Scanned ${files_scanned} Python file${files_scanned === 1 ? "" : "s"}.</span>`;
+  }
   if (debug) {
-    summaryCard.innerHTML += `<div style="width:100%;margin-top:10px;color:var(--muted);font-size:0.85rem;">${escapeHtml(debug)}</div>`;
+    html += `<br><span style="color:var(--muted)">${escapeHtml(debug)}</span>`;
   }
   if (files_list && files_list.length) {
-    summaryCard.innerHTML += `<details style="width:100%;margin-top:8px;">
-      <summary style="cursor:pointer;color:var(--muted);font-size:0.85rem;">Files scanned (${files_list.length})</summary>
-      <div style="margin-top:6px;font-family:ui-monospace,monospace;font-size:0.8rem;color:var(--muted);max-height:150px;overflow-y:auto;">
-        ${files_list.map(escapeHtml).join("<br>")}
-      </div>
-    </details>`;
+    html += `<span class="files-toggle" id="files-toggle">Show scanned files (${files_list.length})</span>
+      <div class="files-list" id="files-list-box" hidden>${files_list.map(escapeHtml).join("<br>")}</div>`;
+  }
+  summaryLine.innerHTML = html;
+
+  const toggle = document.getElementById("files-toggle");
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      const box = document.getElementById("files-list-box");
+      box.hidden = !box.hidden;
+      toggle.textContent = box.hidden ? `Show scanned files (${files_list.length})` : "Hide scanned files";
+    });
   }
 
-  const security = issues.filter((i) => i.category === "security")
+  const security = (issues || []).filter((i) => i.category === "security")
     .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
-  const quality = issues.filter((i) => i.category === "quality")
+  const quality = (issues || []).filter((i) => i.category === "quality")
     .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 
-  renderIssueList("tab-security", security, "No security findings 🎉");
-  renderIssueList("tab-quality", quality, "No quality findings 🎉");
-  renderErrorList("tab-errors", parse_errors);
+  renderLedger("tab-security", security, "No security findings. Nothing hardcoded that looks like a secret.");
+  renderLedger("tab-quality", quality, "No quality findings. Nothing over threshold.");
+  renderErrorLedger("tab-errors", parse_errors || []);
 
   resultsSection.hidden = false;
 }
 
-function stat(num, label) {
-  return `<div class="stat"><span class="num">${num}</span><span class="label">${label}</span></div>`;
-}
-
-function renderIssueList(containerId, list, emptyMsg) {
+function renderLedger(containerId, list, emptyMsg) {
   const el = document.getElementById(containerId);
   if (!list.length) {
-    el.innerHTML = `<div class="empty-state">${emptyMsg}</div>`;
+    el.innerHTML = `<div class="empty">${emptyMsg}</div>`;
     return;
   }
   el.innerHTML = list.map((issue) => `
-    <div class="issue-row">
-      <span class="badge ${issue.severity}">${issue.severity}</span>
-      <div class="issue-body">
-        <div class="loc">${escapeHtml(issue.file)}:${issue.line} — ${escapeHtml(issue.checker)}</div>
-        <div class="msg">${escapeHtml(issue.message)}</div>
+    <div class="row">
+      <span class="dot ${issue.severity}"></span>
+      <div>
+        <div class="row-loc">
+          <span class="sev">${issue.severity}</span>
+          <span>${escapeHtml(issue.file)}:${issue.line}</span>
+          <span class="checker">${escapeHtml(issue.checker)}</span>
+        </div>
+        <div class="row-msg">${escapeHtml(issue.message)}</div>
       </div>
     </div>
   `).join("");
 }
 
-function renderErrorList(containerId, errors) {
+function renderErrorLedger(containerId, errors) {
   const el = document.getElementById(containerId);
   if (!errors.length) {
-    el.innerHTML = `<div class="empty-state">No parse errors 🎉</div>`;
+    el.innerHTML = `<div class="empty">No parse errors. Every file scanned cleanly.</div>`;
     return;
   }
-  el.innerHTML = errors.map((e) => `<div class="issue-row"><div class="issue-body msg">${escapeHtml(e)}</div></div>`).join("");
+  el.innerHTML = errors.map((e) => `
+    <div class="row">
+      <span class="dot warning"></span>
+      <div class="row-msg">${escapeHtml(e)}</div>
+    </div>
+  `).join("");
 }
 
 function escapeHtml(str) {
@@ -155,7 +175,7 @@ function escapeHtml(str) {
 document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".tab-content").forEach((c) => (c.hidden = true));
+    document.querySelectorAll(".ledger").forEach((c) => (c.hidden = true));
     btn.classList.add("active");
     document.getElementById(`tab-${btn.dataset.tab}`).hidden = false;
   });
