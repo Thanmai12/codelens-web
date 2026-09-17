@@ -6,30 +6,39 @@ const errorBox = document.getElementById("error-box");
 const loadingSection = document.getElementById("loading");
 const loadingText = document.getElementById("loading-text");
 const resultsSection = document.getElementById("results");
-const summaryLine = document.getElementById("summary-line");
 
 let selectedFile = null;
+let currentData = null;
+let activeCategory = "all";
+let activeSeverity = "all";
 
 const LOADING_MESSAGES = ["Reading files", "Walking the tree", "Checking for secrets", "Scoring complexity"];
 
-dropzone.addEventListener("click", () => fileInput.click());
+/* ---------- Navigation ---------- */
 
-dropzone.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  dropzone.classList.add("dragover");
+document.querySelectorAll(".nav-item").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    const view = btn.dataset.view;
+    document.getElementById("view-home").hidden = view !== "home";
+    document.getElementById("view-history").hidden = view !== "history";
+    document.getElementById("view-settings").hidden = view !== "settings";
+    if (view === "history") renderHistory();
+  });
 });
 
-dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+/* ---------- Upload ---------- */
 
+dropzone.addEventListener("click", () => fileInput.click());
+dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
+dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
 dropzone.addEventListener("drop", (e) => {
   e.preventDefault();
   dropzone.classList.remove("dragover");
   if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
 });
-
-fileInput.addEventListener("change", () => {
-  if (fileInput.files.length) handleFile(fileInput.files[0]);
-});
+fileInput.addEventListener("change", () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
 
 function handleFile(file) {
   if (!file.name.toLowerCase().endsWith(".zip")) {
@@ -42,14 +51,8 @@ function handleFile(file) {
   hideError();
 }
 
-function showError(msg) {
-  errorBox.textContent = msg;
-  errorBox.hidden = false;
-}
-
-function hideError() {
-  errorBox.hidden = true;
-}
+function showError(msg) { errorBox.textContent = msg; errorBox.hidden = false; }
+function hideError() { errorBox.hidden = true; }
 
 let loadingInterval = null;
 
@@ -69,17 +72,18 @@ scanBtn.addEventListener("click", async () => {
 
   const form = new FormData();
   form.append("project", selectedFile);
+  const projectName = selectedFile.name;
 
   try {
     const resp = await fetch("/api/scan", { method: "POST", body: form });
     const data = await resp.json();
     if (!resp.ok) {
       const detail = data.detail || data.error || "Scan failed.";
-      const filesNote = data.files_scanned !== undefined
-        ? ` (${data.files_scanned} files were found before the crash)` : "";
+      const filesNote = data.files_scanned !== undefined ? ` (${data.files_scanned} files were found before the crash)` : "";
       throw new Error(detail + filesNote);
     }
     renderResults(data);
+    saveToHistory(projectName, data);
     dropzone.classList.add("snap");
     setTimeout(() => dropzone.classList.remove("snap"), 400);
   } catch (err) {
@@ -91,54 +95,96 @@ scanBtn.addEventListener("click", async () => {
   }
 });
 
+/* ---------- Results rendering ---------- */
+
 function renderResults(data) {
-  const { summary, issues, parse_errors, files_scanned, files_list, debug } = data;
+  currentData = data;
+  activeCategory = "all";
+  activeSeverity = "all";
+  document.querySelectorAll("#filter-category .filter-btn").forEach((b) => b.classList.toggle("active", b.dataset.value === "all"));
+  document.querySelectorAll("#filter-severity .filter-btn").forEach((b) => b.classList.toggle("active", b.dataset.value === "all"));
 
-  let html = `<span class="big">${summary.total}</span> issue${summary.total === 1 ? "" : "s"} found: `
-    + `<span class="big">${summary.security}</span> security, <span class="big">${summary.quality}</span> quality`
-    + (summary.critical ? `, <span class="big" style="color:var(--critical)">${summary.critical}</span> critical` : "") + ".";
+  const score = data.score || { overall: 0, security: 0, quality: 0, complexity: 0 };
+  document.getElementById("score-num").textContent = score.overall;
+  setBar("security", score.security);
+  setBar("quality", score.quality);
+  setBar("complexity", score.complexity);
 
-  if (files_scanned !== undefined) {
-    html += `<br><span style="color:var(--muted)">Scanned ${files_scanned} Python file${files_scanned === 1 ? "" : "s"}.</span>`;
-  }
-  if (debug) {
-    html += `<br><span style="color:var(--muted)">${escapeHtml(debug)}</span>`;
-  }
-  if (files_list && files_list.length) {
-    html += `<span class="files-toggle" id="files-toggle">Show scanned files (${files_list.length})</span>
-      <div class="files-list" id="files-list-box" hidden>${files_list.map(escapeHtml).join("<br>")}</div>`;
-  }
-  summaryLine.innerHTML = html;
+  document.getElementById("stat-scanned").textContent = data.files_scanned ?? "—";
+  document.getElementById("stat-analyzed").textContent = data.files_analyzed ?? "—";
+  document.getElementById("stat-errors").textContent = data.files_with_errors ?? "—";
+  document.getElementById("stat-total").textContent = data.summary.total;
 
-  const toggle = document.getElementById("files-toggle");
-  if (toggle) {
-    toggle.addEventListener("click", () => {
-      const box = document.getElementById("files-list-box");
-      box.hidden = !box.hidden;
-      toggle.textContent = box.hidden ? `Show scanned files (${files_list.length})` : "Hide scanned files";
-    });
-  }
+  const sevRow = document.getElementById("severity-row");
+  const sevs = [
+    { key: "critical", label: "Critical", color: "var(--critical)" },
+    { key: "error", label: "Error", color: "var(--error)" },
+    { key: "warning", label: "Warning", color: "var(--warning)" },
+    { key: "info", label: "Info", color: "var(--info)" },
+  ];
+  sevRow.innerHTML = sevs.map((s) => `
+    <div class="sev-card" style="--sev-color:${s.color}">
+      <span class="sev-num">${data.summary[s.key] || 0}</span>
+      <span class="sev-label">${s.label}</span>
+    </div>
+  `).join("");
 
-  const security = (issues || []).filter((i) => i.category === "security")
-    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
-  const quality = (issues || []).filter((i) => i.category === "quality")
-    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
-
-  renderLedger("tab-security", security, "No security findings. Nothing hardcoded that looks like a secret.");
-  renderLedger("tab-quality", quality, "No quality findings. Nothing over threshold.");
-  renderErrorLedger("tab-errors", parse_errors || []);
-
+  applyFilters();
   resultsSection.hidden = false;
 }
 
-function renderLedger(containerId, list, emptyMsg) {
-  const el = document.getElementById(containerId);
-  if (!list.length) {
-    el.innerHTML = `<div class="empty">${emptyMsg}</div>`;
+function setBar(name, value) {
+  document.getElementById(`bar-${name}`).style.width = `${value}%`;
+  document.getElementById(`num-${name}`).textContent = value;
+}
+
+document.getElementById("filter-category").addEventListener("click", (e) => {
+  const btn = e.target.closest(".filter-btn");
+  if (!btn) return;
+  activeCategory = btn.dataset.value;
+  document.querySelectorAll("#filter-category .filter-btn").forEach((b) => b.classList.toggle("active", b === btn));
+  applyFilters();
+});
+
+document.getElementById("filter-severity").addEventListener("click", (e) => {
+  const btn = e.target.closest(".filter-btn");
+  if (!btn) return;
+  activeSeverity = btn.dataset.value;
+  document.querySelectorAll("#filter-severity .filter-btn").forEach((b) => b.classList.toggle("active", b === btn));
+  applyFilters();
+});
+
+function applyFilters() {
+  if (!currentData) return;
+  const el = document.getElementById("issue-list");
+
+  if (activeCategory === "errors") {
+    const errors = currentData.parse_errors || [];
+    if (!errors.length) {
+      el.innerHTML = `<div class="empty">No parse errors. Every file scanned cleanly.</div>`;
+      return;
+    }
+    el.innerHTML = errors.map((e) => `
+      <div class="row">
+        <span class="dot warning"></span>
+        <div class="row-msg">${escapeHtml(e)}</div>
+      </div>
+    `).join("");
     return;
   }
-  el.innerHTML = list.map((issue) => `
-    <div class="row">
+
+  let list = currentData.issues || [];
+  if (activeCategory !== "all") list = list.filter((i) => i.category === activeCategory);
+  if (activeSeverity !== "all") list = list.filter((i) => i.severity === activeSeverity);
+  list = [...list].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+
+  if (!list.length) {
+    el.innerHTML = `<div class="empty">No issues match these filters.</div>`;
+    return;
+  }
+
+  el.innerHTML = list.map((issue, idx) => `
+    <div class="row" data-idx="${idx}">
       <span class="dot ${issue.severity}"></span>
       <div>
         <div class="row-loc">
@@ -150,18 +196,79 @@ function renderLedger(containerId, list, emptyMsg) {
       </div>
     </div>
   `).join("");
+
+  el.querySelectorAll(".row").forEach((row, idx) => {
+    row.addEventListener("click", () => openDetail(list[idx]));
+  });
 }
 
-function renderErrorLedger(containerId, errors) {
-  const el = document.getElementById(containerId);
-  if (!errors.length) {
-    el.innerHTML = `<div class="empty">No parse errors. Every file scanned cleanly.</div>`;
+/* ---------- Detail overlay ---------- */
+
+const overlay = document.getElementById("detail-overlay");
+const detailBody = document.getElementById("detail-body");
+
+function openDetail(issue) {
+  detailBody.innerHTML = `
+    <h3>${escapeHtml(issue.checker)}</h3>
+    <div class="detail-loc">${escapeHtml(issue.file)}:${issue.line}</div>
+    <div class="detail-field">
+      <div class="detail-field-label">Message</div>
+      <div class="detail-field-value">${escapeHtml(issue.message)}</div>
+    </div>
+    <div class="detail-field">
+      <div class="detail-field-label">Severity</div>
+      <div class="detail-field-value" style="text-transform:capitalize">${issue.severity}</div>
+    </div>
+    <div class="detail-field">
+      <div class="detail-field-label">Category</div>
+      <div class="detail-field-value" style="text-transform:capitalize">${issue.category}</div>
+    </div>
+    ${issue.why ? `<div class="detail-field"><div class="detail-field-label">Why this matters</div><div class="detail-field-value">${escapeHtml(issue.why)}</div></div>` : ""}
+    ${issue.fix ? `<div class="detail-field"><div class="detail-field-label">How to fix</div><div class="detail-field-value">${escapeHtml(issue.fix)}</div></div>` : ""}
+  `;
+  overlay.hidden = false;
+}
+
+document.getElementById("detail-close").addEventListener("click", () => { overlay.hidden = true; });
+overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.hidden = true; });
+
+/* ---------- History (localStorage) ---------- */
+
+function saveToHistory(projectName, data) {
+  try {
+    const history = JSON.parse(localStorage.getItem("codelens_history") || "[]");
+    history.unshift({
+      name: projectName,
+      date: new Date().toISOString(),
+      score: data.score ? data.score.overall : null,
+      total: data.summary.total,
+      security: data.summary.security,
+      quality: data.summary.quality,
+    });
+    localStorage.setItem("codelens_history", JSON.stringify(history.slice(0, 20)));
+  } catch (e) { /* localStorage unavailable — history just won't persist */ }
+}
+
+function renderHistory() {
+  const el = document.getElementById("history-list");
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem("codelens_history") || "[]"); } catch (e) {}
+
+  if (!history.length) {
+    el.innerHTML = `<div class="empty">No scans yet. Run one from Home and it'll show up here.</div>`;
     return;
   }
-  el.innerHTML = errors.map((e) => `
+
+  el.innerHTML = history.map((h) => `
     <div class="row">
-      <span class="dot warning"></span>
-      <div class="row-msg">${escapeHtml(e)}</div>
+      <span class="dot ${h.score >= 80 ? "info" : h.score >= 50 ? "warning" : "critical"}"></span>
+      <div>
+        <div class="row-loc">
+          <span>${new Date(h.date).toLocaleString()}</span>
+          <span class="checker">score ${h.score ?? "—"}/100</span>
+        </div>
+        <div class="row-msg">${escapeHtml(h.name)} — ${h.total} issue${h.total === 1 ? "" : "s"} (${h.security} security, ${h.quality} quality)</div>
+      </div>
     </div>
   `).join("");
 }
@@ -171,12 +278,3 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
-
-document.querySelectorAll(".tab-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".ledger").forEach((c) => (c.hidden = true));
-    btn.classList.add("active");
-    document.getElementById(`tab-${btn.dataset.tab}`).hidden = false;
-  });
-});
