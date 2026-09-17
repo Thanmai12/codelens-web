@@ -3,45 +3,142 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CodeLens — Python Static Analysis</title>
+  <title>CodeLens</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <h1>🔍 CodeLens</h1>
-      <p class="tagline">Upload a Python project (.zip) — get code-quality and hardcoded-secret findings in seconds.</p>
-    </header>
-
-    <section id="upload-section" class="card">
-      <div id="dropzone" class="dropzone">
-        <p><strong>Drag & drop a .zip</strong> of your project here, or click to choose a file.</p>
-        <p class="hint">Max 20&nbsp;MB · nothing is stored — analyzed in memory and discarded</p>
-        <input type="file" id="file-input" accept=".zip" hidden />
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="14" cy="14" r="9" stroke="currentColor" stroke-width="2"/>
+          <circle cx="14" cy="14" r="4" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+          <line x1="20.5" y1="20.5" x2="27" y2="27" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="wordmark">CodeLens</span>
       </div>
-      <div id="file-name" class="file-name"></div>
-      <button id="scan-btn" disabled>Scan project</button>
-      <div id="error-box" class="error-box" hidden></div>
-    </section>
+      <nav class="nav">
+        <button class="nav-item active" data-view="home">Home</button>
+        <button class="nav-item" data-view="home">Scan project</button>
+        <button class="nav-item" data-view="history">History</button>
+        <button class="nav-item" data-view="settings">Settings</button>
+      </nav>
+      <div class="sidebar-foot">Python quality &amp; security scanner</div>
+    </aside>
 
-    <section id="loading" class="card" hidden>
-      <div class="spinner"></div>
-      <p>Scanning your project…</p>
-    </section>
+    <main class="content">
+      <section id="view-home">
+        <header class="page-head">
+          <div>
+            <h1>Analyze your Python project</h1>
+            <p class="sub">Find code quality issues and security vulnerabilities before they reach production.</p>
+          </div>
+        </header>
 
-    <section id="results" hidden>
-      <div id="summary-card" class="card"></div>
+        <div class="upload-row">
+          <div class="frame" id="dropzone">
+            <span class="corner tl"></span><span class="corner tr"></span>
+            <span class="corner bl"></span><span class="corner br"></span>
+            <div class="frame-content">
+              <p class="frame-title">Drop your project .zip here</p>
+              <p class="frame-hint">or click to choose a file. Max 20&nbsp;MB.</p>
+              <input type="file" id="file-input" accept=".zip" hidden />
+            </div>
+          </div>
 
-      <div class="tabs">
-        <button class="tab-btn active" data-tab="security">Security</button>
-        <button class="tab-btn" data-tab="quality">Code Quality</button>
-        <button class="tab-btn" data-tab="errors">Parse Errors</button>
-      </div>
+          <div class="quick-panel">
+            <div class="panel-label">Selected file</div>
+            <div id="file-name" class="file-name">No file chosen</div>
+            <button id="scan-btn" disabled>Analyze project</button>
+            <div id="error-box" class="error-box" hidden></div>
+          </div>
+        </div>
 
-      <div id="tab-security" class="tab-content card"></div>
-      <div id="tab-quality" class="tab-content card" hidden></div>
-      <div id="tab-errors" class="tab-content card" hidden></div>
-    </section>
+        <section id="loading" class="frame loading-frame" hidden>
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <div class="scanline"></div>
+          <p class="loading-text" id="loading-text">Reading files</p>
+        </section>
+
+        <section id="results" hidden>
+
+          <div class="score-row">
+            <div class="score-ring-card">
+              <div class="ring" id="score-ring">
+                <span class="ring-num" id="score-num">—</span>
+                <span class="ring-den">/ 100</span>
+              </div>
+              <div class="ring-label">Code quality score</div>
+            </div>
+
+            <div class="subscore-card">
+              <div class="subscore-row">
+                <span class="subscore-label">Security</span>
+                <div class="bar"><div class="bar-fill security" id="bar-security"></div></div>
+                <span class="subscore-num" id="num-security">—</span>
+              </div>
+              <div class="subscore-row">
+                <span class="subscore-label">Quality</span>
+                <div class="bar"><div class="bar-fill quality" id="bar-quality"></div></div>
+                <span class="subscore-num" id="num-quality">—</span>
+              </div>
+              <div class="subscore-row">
+                <span class="subscore-label">Complexity</span>
+                <div class="bar"><div class="bar-fill complexity" id="bar-complexity"></div></div>
+                <span class="subscore-num" id="num-complexity">—</span>
+              </div>
+            </div>
+
+            <div class="stats-card">
+              <div class="stat-item"><span class="stat-num" id="stat-scanned">—</span><span class="stat-label">Files discovered</span></div>
+              <div class="stat-item"><span class="stat-num" id="stat-analyzed">—</span><span class="stat-label">Files analyzed</span></div>
+              <div class="stat-item"><span class="stat-num" id="stat-errors">—</span><span class="stat-label">Files with errors</span></div>
+              <div class="stat-item"><span class="stat-num" id="stat-total">—</span><span class="stat-label">Issues found</span></div>
+            </div>
+          </div>
+
+          <div class="severity-row" id="severity-row"></div>
+
+          <div class="filters">
+            <div class="filter-group" id="filter-category">
+              <button class="filter-btn active" data-value="all">All</button>
+              <button class="filter-btn" data-value="security">Security</button>
+              <button class="filter-btn" data-value="quality">Quality</button>
+              <button class="filter-btn" data-value="errors">Parse errors</button>
+            </div>
+            <div class="filter-group" id="filter-severity">
+              <button class="filter-btn active" data-value="all">All severities</button>
+              <button class="filter-btn" data-value="critical">Critical</button>
+              <button class="filter-btn" data-value="error">Error</button>
+              <button class="filter-btn" data-value="warning">Warning</button>
+              <button class="filter-btn" data-value="info">Info</button>
+            </div>
+          </div>
+
+          <div id="issue-list" class="ledger"></div>
+        </section>
+      </section>
+
+      <section id="view-history" hidden>
+        <header class="page-head"><h1>Scan history</h1><p class="sub">Stored locally in this browser only.</p></header>
+        <div id="history-list" class="ledger"></div>
+      </section>
+
+      <section id="view-settings" hidden>
+        <header class="page-head"><h1>Settings</h1><p class="sub">Nothing configurable yet — thresholds are fixed in the backend for now.</p></header>
+      </section>
+    </main>
+  </div>
+
+  <div id="detail-overlay" class="overlay" hidden>
+    <div class="detail-card">
+      <button class="detail-close" id="detail-close">&times;</button>
+      <div id="detail-body"></div>
+    </div>
   </div>
 
   <script src="app.js"></script>
