@@ -1,12 +1,3 @@
-"""
-CodeLens web backend.
-
-POST /api/scan  — multipart upload, field name "project" (a .zip of a
-Python project). Extracts it into a temp dir (with zip-slip protection),
-runs the same scanning engine used by the CLI, returns JSON results, then
-deletes the temp dir. Nothing is persisted between requests.
-"""
-
 from __future__ import annotations
 
 import os
@@ -85,7 +76,6 @@ async def scan_project(project: UploadFile = File(...)):
             SecretsChecker(),
         ]
         engine = Engine(checkers)
-        issues, errors = engine.scan(extract_dir)
 
         # Report paths relative to the uploaded project root, not the temp dir
         def relativize(p: str) -> str:
@@ -93,6 +83,42 @@ async def scan_project(project: UploadFile = File(...)):
                 return os.path.relpath(p, extract_dir)
             except ValueError:
                 return p
+
+        # Discover files BEFORE scanning so we can always report how many
+        # .py files were actually found, even if something later goes wrong.
+        discovered = engine.discover_files(extract_dir)
+        discovered_relative = [relativize(p) for p in discovered]
+
+        if not discovered:
+            return JSONResponse({
+                "summary": {"total": 0, "quality": 0, "security": 0, "critical": 0,
+                            "error": 0, "warning": 0, "info": 0},
+                "issues": [],
+                "parse_errors": [],
+                "files_scanned": 0,
+                "files_list": [],
+                "debug": (
+                    "No .py files were found in this upload. Check that your zip "
+                    "actually contains Python files at some level (not just inside "
+                    "another zip, and not only in an excluded folder like venv/ or "
+                    "node_modules/)."
+                ),
+            })
+
+        try:
+            issues, errors = engine.scan(extract_dir)
+        except Exception as e:
+            # Never let an unexpected exception produce an opaque 500 with no
+            # useful body — always tell the caller what files WERE found even
+            # if the scan itself blew up.
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": f"Scan crashed: {type(e).__name__}: {e}",
+                    "files_scanned": len(discovered),
+                    "files_list": discovered_relative,
+                },
+            )
 
         result_issues = []
         for issue in issues:
@@ -118,6 +144,9 @@ async def scan_project(project: UploadFile = File(...)):
             "summary": summary,
             "issues": result_issues,
             "parse_errors": result_errors,
+            "files_scanned": len(discovered),
+            "files_list": discovered_relative,
+            "checkers_run": [c.name for c in checkers],
         })
 
 
