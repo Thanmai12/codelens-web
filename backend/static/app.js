@@ -64,7 +64,10 @@ scanBtn.addEventListener("click", async () => {
     const resp = await fetch("/api/scan", { method: "POST", body: form });
     const data = await resp.json();
     if (!resp.ok) {
-      throw new Error(data.detail || "Scan failed.");
+      const detail = data.detail || data.error || "Scan failed.";
+      const filesNote = data.files_scanned !== undefined
+        ? ` (${data.files_scanned} files were found before the crash)` : "";
+      throw new Error(detail + filesNote);
     }
     renderResults(data);
   } catch (err) {
@@ -76,9 +79,10 @@ scanBtn.addEventListener("click", async () => {
 });
 
 function renderResults(data) {
-  const { summary, issues, parse_errors } = data;
+  const { summary, issues, parse_errors, files_scanned, files_list, debug } = data;
 
   summaryCard.innerHTML = `
+    ${stat(files_scanned ?? "?", "Files scanned")}
     ${stat(summary.total, "Total")}
     ${stat(summary.security, "Security")}
     ${stat(summary.quality, "Quality")}
@@ -87,6 +91,18 @@ function renderResults(data) {
     ${stat(summary.warning, "Warning")}
     ${stat(summary.info, "Info")}
   `;
+
+  if (debug) {
+    summaryCard.innerHTML += `<div style="width:100%;margin-top:10px;color:var(--muted);font-size:0.85rem;">${escapeHtml(debug)}</div>`;
+  }
+  if (files_list && files_list.length) {
+    summaryCard.innerHTML += `<details style="width:100%;margin-top:8px;">
+      <summary style="cursor:pointer;color:var(--muted);font-size:0.85rem;">Files scanned (${files_list.length})</summary>
+      <div style="margin-top:6px;font-family:ui-monospace,monospace;font-size:0.8rem;color:var(--muted);max-height:150px;overflow-y:auto;">
+        ${files_list.map(escapeHtml).join("<br>")}
+      </div>
+    </details>`;
+  }
 
   const security = issues.filter((i) => i.category === "security")
     .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
