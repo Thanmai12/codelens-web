@@ -360,6 +360,10 @@ button#scan-btn:disabled { background: var(--hairline); color: var(--muted); cur
   padding: 20px;
 }
 
+.overlay[hidden] {
+  display: none;
+}
+
 .detail-card {
   position: relative;
   background: var(--panel-raised);
