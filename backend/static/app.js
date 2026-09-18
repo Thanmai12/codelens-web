@@ -1,29 +1,30 @@
-const dropzone = document.getElementById("dropzone");
+const dropzone = document.getElementById("dropzone-inner");
 const fileInput = document.getElementById("file-input");
 const fileNameEl = document.getElementById("file-name");
 const scanBtn = document.getElementById("scan-btn");
 const errorBox = document.getElementById("error-box");
-const loadingSection = document.getElementById("loading");
+const loadingBox = document.getElementById("loading-box");
 const loadingText = document.getElementById("loading-text");
-const resultsSection = document.getElementById("results");
 
 let selectedFile = null;
 let currentData = null;
 let activeCategory = "all";
 let activeSeverity = "all";
+let selectedIssue = null;
+let searchTerm = "";
 
 const LOADING_MESSAGES = ["Reading files", "Walking the tree", "Checking for secrets", "Scoring complexity"];
+const SEV_ORDER = { critical: 0, error: 1, warning: 2, info: 3 };
 
 /* ---------- Navigation ---------- */
 
-document.querySelectorAll(".nav-item").forEach((btn) => {
+document.querySelectorAll(".nav-link").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
+    document.querySelectorAll(".nav-link").forEach((b) => b.classList.remove("active", "bg-surface-hover", "text-white"));
+    btn.classList.add("active", "bg-surface-hover", "text-white");
     const view = btn.dataset.view;
-    document.getElementById("view-home").hidden = view !== "home";
+    document.getElementById("view-dashboard").hidden = view !== "dashboard";
     document.getElementById("view-history").hidden = view !== "history";
-    document.getElementById("view-settings").hidden = view !== "settings";
     if (view === "history") renderHistory();
   });
 });
@@ -31,11 +32,9 @@ document.querySelectorAll(".nav-item").forEach((btn) => {
 /* ---------- Upload ---------- */
 
 dropzone.addEventListener("click", () => fileInput.click());
-dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
-dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
-dropzone.addEventListener("drop", (e) => {
+document.getElementById("dropzone").addEventListener("dragover", (e) => e.preventDefault());
+document.getElementById("dropzone").addEventListener("drop", (e) => {
   e.preventDefault();
-  dropzone.classList.remove("dragover");
   if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
 });
 fileInput.addEventListener("change", () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
@@ -46,7 +45,7 @@ function handleFile(file) {
     return;
   }
   selectedFile = file;
-  fileNameEl.textContent = `${file.name} — ${(file.size / 1024).toFixed(0)} KB`;
+  fileNameEl.textContent = file.name;
   scanBtn.disabled = false;
   hideError();
 }
@@ -59,16 +58,15 @@ let loadingInterval = null;
 scanBtn.addEventListener("click", async () => {
   if (!selectedFile) return;
   hideError();
-  resultsSection.hidden = true;
-  loadingSection.hidden = false;
   scanBtn.disabled = true;
+  loadingBox.hidden = false;
 
   let msgIndex = 0;
   loadingText.textContent = LOADING_MESSAGES[0];
   loadingInterval = setInterval(() => {
     msgIndex = (msgIndex + 1) % LOADING_MESSAGES.length;
     loadingText.textContent = LOADING_MESSAGES[msgIndex];
-  }, 1400);
+  }, 1200);
 
   const form = new FormData();
   form.append("project", selectedFile);
@@ -84,13 +82,11 @@ scanBtn.addEventListener("click", async () => {
     }
     renderResults(data);
     saveToHistory(projectName, data);
-    dropzone.classList.add("snap");
-    setTimeout(() => dropzone.classList.remove("snap"), 400);
   } catch (err) {
     showError(err.message || "Something went wrong while scanning.");
   } finally {
     clearInterval(loadingInterval);
-    loadingSection.hidden = true;
+    loadingBox.hidden = true;
     scanBtn.disabled = false;
   }
 });
@@ -101,11 +97,20 @@ function renderResults(data) {
   currentData = data;
   activeCategory = "all";
   activeSeverity = "all";
-  document.querySelectorAll("#filter-category .filter-btn").forEach((b) => b.classList.toggle("active", b.dataset.value === "all"));
-  document.querySelectorAll("#filter-severity .filter-btn").forEach((b) => b.classList.toggle("active", b.dataset.value === "all"));
+  searchTerm = "";
+  document.getElementById("issue-search").value = "";
+  selectedIssue = null;
+  document.querySelectorAll(".cat-btn").forEach((b) => setActive(b, b.dataset.value === "all"));
+  document.querySelectorAll(".sev-btn").forEach((b) => setActive(b, b.dataset.value === "all"));
 
   const score = data.score || { overall: 0, security: 0, quality: 0, complexity: 0 };
   document.getElementById("score-num").textContent = score.overall;
+  document.getElementById("score-arc").setAttribute("stroke-dasharray", `${score.overall}, 100`);
+  const label = document.getElementById("score-label");
+  if (score.overall >= 85) { label.textContent = "Great health"; label.className = "text-xs font-semibold text-accent-emerald mt-0.5"; }
+  else if (score.overall >= 60) { label.textContent = "Needs attention"; label.className = "text-xs font-semibold text-accent-amber mt-0.5"; }
+  else { label.textContent = "At risk"; label.className = "text-xs font-semibold text-accent-rose mt-0.5"; }
+
   setBar("security", score.security);
   setBar("quality", score.quality);
   setBar("complexity", score.complexity);
@@ -115,59 +120,70 @@ function renderResults(data) {
   document.getElementById("stat-errors").textContent = data.files_with_errors ?? "—";
   document.getElementById("stat-total").textContent = data.summary.total;
 
-  const sevRow = document.getElementById("severity-row");
-  const sevs = [
-    { key: "critical", label: "Critical", color: "var(--critical)" },
-    { key: "error", label: "Error", color: "var(--error)" },
-    { key: "warning", label: "Warning", color: "var(--warning)" },
-    { key: "info", label: "Info", color: "var(--info)" },
-  ];
-  sevRow.innerHTML = sevs.map((s) => `
-    <div class="sev-card" style="--sev-color:${s.color}">
-      <span class="sev-num">${data.summary[s.key] || 0}</span>
-      <span class="sev-label">${s.label}</span>
-    </div>
-  `).join("");
-
   applyFilters();
-  resultsSection.hidden = false;
 }
 
 function setBar(name, value) {
   document.getElementById(`bar-${name}`).style.width = `${value}%`;
-  document.getElementById(`num-${name}`).textContent = value;
+  document.getElementById(`num-${name}`).textContent = `${value}/100`;
+}
+
+function setActive(btn, isActive) {
+  btn.classList.toggle("active", isActive);
+  if (btn.classList.contains("cat-btn")) {
+    btn.classList.toggle("bg-accent-blue", isActive);
+    btn.classList.toggle("text-white", isActive);
+    btn.classList.toggle("bg-surface-card", !isActive);
+    btn.classList.toggle("text-slate-400", !isActive);
+  } else {
+    btn.classList.toggle("bg-surface-hover", isActive);
+    btn.classList.toggle("text-slate-200", isActive);
+    btn.classList.toggle("bg-surface-card", !isActive);
+    btn.classList.toggle("text-slate-400", !isActive);
+  }
 }
 
 document.getElementById("filter-category").addEventListener("click", (e) => {
-  const btn = e.target.closest(".filter-btn");
+  const btn = e.target.closest(".cat-btn");
   if (!btn) return;
   activeCategory = btn.dataset.value;
-  document.querySelectorAll("#filter-category .filter-btn").forEach((b) => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".cat-btn").forEach((b) => setActive(b, b === btn));
   applyFilters();
 });
 
 document.getElementById("filter-severity").addEventListener("click", (e) => {
-  const btn = e.target.closest(".filter-btn");
+  const btn = e.target.closest(".sev-btn");
   if (!btn) return;
   activeSeverity = btn.dataset.value;
-  document.querySelectorAll("#filter-severity .filter-btn").forEach((b) => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".sev-btn").forEach((b) => setActive(b, b === btn));
   applyFilters();
 });
 
+document.getElementById("issue-search").addEventListener("input", (e) => {
+  searchTerm = e.target.value.toLowerCase();
+  applyFilters();
+});
+
+const SEV_STYLES = {
+  critical: { border: "border-l-rose-500", bg: "bg-rose-500/10", text: "text-rose-400" },
+  error: { border: "border-l-amber-500", bg: "bg-amber-500/10", text: "text-amber-400" },
+  warning: { border: "border-l-yellow-500", bg: "bg-yellow-500/10", text: "text-yellow-400" },
+  info: { border: "border-l-blue-500", bg: "bg-blue-500/10", text: "text-blue-400" },
+};
+
 function applyFilters() {
   if (!currentData) return;
-  const el = document.getElementById("issue-list");
+  const feed = document.getElementById("issues-feed");
 
   if (activeCategory === "errors") {
-    const errors = currentData.parse_errors || [];
-    if (!errors.length) {
-      el.innerHTML = `<div class="empty">No parse errors. Every file scanned cleanly.</div>`;
+    const errs = currentData.parse_errors || [];
+    if (!errs.length) {
+      feed.innerHTML = `<div class="text-slate-600 text-xs text-center mt-8">No parse errors. Every file scanned cleanly.</div>`;
       return;
     }
-    el.innerHTML = errors.map((e) => `
-      <div class="row">
-        <span class="dot warning"></span>
-        <div class="row-msg">${escapeHtml(e)}</div>
+    feed.innerHTML = errs.map((e) => `
+      <div class="p-3 rounded-r-xl border border-surface-border border-l-4 border-l-amber-500 bg-surface-panel/40">
+        <p class="text-xs text-slate-300">${escapeHtml(e)}</p>
       </div>
     `).join("");
     return;
@@ -176,61 +192,92 @@ function applyFilters() {
   let list = currentData.issues || [];
   if (activeCategory !== "all") list = list.filter((i) => i.category === activeCategory);
   if (activeSeverity !== "all") list = list.filter((i) => i.severity === activeSeverity);
-  list = [...list].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+  if (searchTerm) list = list.filter((i) => i.message.toLowerCase().includes(searchTerm) || i.file.toLowerCase().includes(searchTerm) || i.checker.toLowerCase().includes(searchTerm));
+  list = [...list].sort((a, b) => (SEV_ORDER[a.severity] - SEV_ORDER[b.severity]) || a.file.localeCompare(b.file));
 
   if (!list.length) {
-    el.innerHTML = `<div class="empty">No issues match these filters.</div>`;
+    feed.innerHTML = `<div class="text-slate-600 text-xs text-center mt-8">No issues match these filters.</div>`;
     return;
   }
 
-  el.innerHTML = list.map((issue, idx) => `
-    <div class="row" data-idx="${idx}">
-      <span class="dot ${issue.severity}"></span>
-      <div>
-        <div class="row-loc">
-          <span class="sev">${issue.severity}</span>
-          <span>${escapeHtml(issue.file)}:${issue.line}</span>
-          <span class="checker">${escapeHtml(issue.checker)}</span>
+  feed.innerHTML = list.map((issue, idx) => {
+    const s = SEV_STYLES[issue.severity] || SEV_STYLES.info;
+    const isSelected = selectedIssue === issue;
+    return `
+      <div class="issue-card p-3 rounded-r-xl border border-surface-border border-l-4 ${s.border} ${isSelected ? "bg-surface-card ring-1 ring-accent-blue/40" : "bg-surface-panel/40 hover:bg-surface-card"} transition cursor-pointer" data-idx="${idx}">
+        <div class="flex items-center justify-between text-[10px] font-mono">
+          <span class="uppercase font-bold tracking-wider px-1.5 py-0.5 rounded ${s.bg} ${s.text}">${issue.severity}</span>
+          <span class="text-slate-500">Line ${issue.line}</span>
         </div>
-        <div class="row-msg">${escapeHtml(issue.message)}</div>
+        <h4 class="text-xs font-semibold text-slate-100 mt-1.5">${escapeHtml(issue.checker)}</h4>
+        <p class="text-[11px] text-slate-400 mt-0.5 line-clamp-2">${escapeHtml(issue.message)}</p>
+        <div class="flex items-center justify-between mt-2 pt-1.5 border-t border-surface-border/60 text-[10px] text-slate-500 font-mono">
+          <span><i class="fa-regular fa-file-code mr-1"></i>${escapeHtml(issue.file)}</span>
+          <span class="capitalize">${issue.category}</span>
+        </div>
       </div>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 
-  el.querySelectorAll(".row").forEach((row, idx) => {
-    row.addEventListener("click", () => openDetail(list[idx]));
+  feed.querySelectorAll(".issue-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      selectedIssue = list[Number(card.dataset.idx)];
+      applyFilters();
+      renderCodeViewer(selectedIssue);
+    });
   });
 }
 
-/* ---------- Detail overlay ---------- */
+/* ---------- Code viewer ---------- */
 
-const overlay = document.getElementById("detail-overlay");
-const detailBody = document.getElementById("detail-body");
+function renderCodeViewer(issue) {
+  const viewport = document.getElementById("code-viewport");
+  const filenameEl = document.getElementById("viewer-filename");
+  const statusParsed = document.getElementById("status-parsed");
+  const statusLine = document.getElementById("status-lineno");
 
-function openDetail(issue) {
-  detailBody.innerHTML = `
-    <h3>${escapeHtml(issue.checker)}</h3>
-    <div class="detail-loc">${escapeHtml(issue.file)}:${issue.line}</div>
-    <div class="detail-field">
-      <div class="detail-field-label">Message</div>
-      <div class="detail-field-value">${escapeHtml(issue.message)}</div>
-    </div>
-    <div class="detail-field">
-      <div class="detail-field-label">Severity</div>
-      <div class="detail-field-value" style="text-transform:capitalize">${issue.severity}</div>
-    </div>
-    <div class="detail-field">
-      <div class="detail-field-label">Category</div>
-      <div class="detail-field-value" style="text-transform:capitalize">${issue.category}</div>
-    </div>
-    ${issue.why ? `<div class="detail-field"><div class="detail-field-label">Why this matters</div><div class="detail-field-value">${escapeHtml(issue.why)}</div></div>` : ""}
-    ${issue.fix ? `<div class="detail-field"><div class="detail-field-label">How to fix</div><div class="detail-field-value">${escapeHtml(issue.fix)}</div></div>` : ""}
-  `;
-  overlay.hidden = false;
+  const source = currentData.sources && currentData.sources[issue.file];
+  filenameEl.textContent = issue.file;
+  statusLine.textContent = `Line ${issue.line}`;
+  statusParsed.innerHTML = `<i class="fa-solid fa-check-double mr-1.5"></i>AST parsed`;
+  statusParsed.className = "flex items-center text-emerald-500";
+
+  if (!source) {
+    viewport.innerHTML = `<div class="text-slate-600 text-center mt-10">Source not available for this file.</div>`;
+    return;
+  }
+
+  const lines = source.split("\n");
+  const rows = lines.map((line, i) => {
+    const lineNum = i + 1;
+    const isTarget = lineNum === issue.line;
+    const highlightClass = isTarget ? `line-highlight-${issue.severity}` : "";
+    const escaped = escapeHtml(line) || " ";
+    const banner = isTarget ? `
+      <div class="mx-8 my-1 p-2 rounded bg-surface-card border border-surface-border flex items-start space-x-2 text-[11px]">
+        <i class="fa-solid fa-circle-info text-accent-blue mt-0.5"></i>
+        <div>
+          <span class="text-slate-200 font-sans font-medium">${escapeHtml(issue.message)}</span>
+          ${issue.fix ? `<div class="text-slate-400 font-sans mt-1">${escapeHtml(issue.fix)}</div>` : ""}
+        </div>
+      </div>
+    ` : "";
+    return `
+      <div class="flex flex-col ${highlightClass}">
+        <div class="flex items-start py-0.5 px-2">
+          <span class="w-8 text-right pr-3 text-slate-600 select-none text-[10px] shrink-0">${lineNum}</span>
+          <pre class="flex-1 whitespace-pre-wrap m-0"><code class="language-python">${escaped}</code></pre>
+        </div>
+        ${banner}
+      </div>
+    `;
+  }).join("");
+
+  viewport.innerHTML = rows;
+  viewport.querySelectorAll("code").forEach((block) => {
+    if (window.hljs) hljs.highlightElement(block);
+  });
 }
-
-document.getElementById("detail-close").addEventListener("click", () => { overlay.hidden = true; });
-overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.hidden = true; });
 
 /* ---------- History (localStorage) ---------- */
 
@@ -246,7 +293,7 @@ function saveToHistory(projectName, data) {
       quality: data.summary.quality,
     });
     localStorage.setItem("codelens_history", JSON.stringify(history.slice(0, 20)));
-  } catch (e) { /* localStorage unavailable — history just won't persist */ }
+  } catch (e) { /* localStorage unavailable */ }
 }
 
 function renderHistory() {
@@ -255,20 +302,17 @@ function renderHistory() {
   try { history = JSON.parse(localStorage.getItem("codelens_history") || "[]"); } catch (e) {}
 
   if (!history.length) {
-    el.innerHTML = `<div class="empty">No scans yet. Run one from Home and it'll show up here.</div>`;
+    el.innerHTML = `<div class="text-slate-600 text-xs">No scans yet. Run one from Dashboard and it'll show up here.</div>`;
     return;
   }
 
   el.innerHTML = history.map((h) => `
-    <div class="row">
-      <span class="dot ${h.score >= 80 ? "info" : h.score >= 50 ? "warning" : "critical"}"></span>
-      <div>
-        <div class="row-loc">
-          <span>${new Date(h.date).toLocaleString()}</span>
-          <span class="checker">score ${h.score ?? "—"}/100</span>
-        </div>
-        <div class="row-msg">${escapeHtml(h.name)} — ${h.total} issue${h.total === 1 ? "" : "s"} (${h.security} security, ${h.quality} quality)</div>
+    <div class="p-3 rounded-lg border border-surface-border bg-surface-card">
+      <div class="flex items-center justify-between text-[11px] font-mono text-slate-500">
+        <span>${new Date(h.date).toLocaleString()}</span>
+        <span>score ${h.score ?? "—"}/100</span>
       </div>
+      <div class="text-xs text-slate-300 mt-1">${escapeHtml(h.name)} — ${h.total} issue${h.total === 1 ? "" : "s"} (${h.security} security, ${h.quality} quality)</div>
     </div>
   `).join("");
 }
