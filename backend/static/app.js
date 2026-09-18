@@ -1,4 +1,4 @@
-const dropzone = document.getElementById("dropzone");
+const dropzone = document.getElementById("dropzone-inner");
 const fileInput = document.getElementById("file-input");
 const fileNameEl = document.getElementById("file-name");
 const scanBtn = document.getElementById("scan-btn");
@@ -29,36 +29,15 @@ document.querySelectorAll(".nav-link").forEach((btn) => {
   });
 });
 
-/* ---------- File Upload & Dropzone Handling ---------- */
+/* ---------- Upload ---------- */
 
-// Trigger file input click, but ignore clicks on the Analyze button
-dropzone.addEventListener("click", (e) => {
-  if (e.target.id === "scan-btn") return;
-  fileInput.click();
-});
-
-dropzone.addEventListener("dragover", (e) => {
+dropzone.addEventListener("click", () => fileInput.click());
+document.getElementById("dropzone").addEventListener("dragover", (e) => e.preventDefault());
+document.getElementById("dropzone").addEventListener("drop", (e) => {
   e.preventDefault();
-  dropzone.classList.add("border-accent-blue", "bg-surface-hover");
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
 });
-
-dropzone.addEventListener("dragleave", () => {
-  dropzone.classList.remove("border-accent-blue", "bg-surface-hover");
-});
-
-dropzone.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dropzone.classList.remove("border-accent-blue", "bg-surface-hover");
-  if (e.dataTransfer.files.length) {
-    handleFile(e.dataTransfer.files[0]);
-  }
-});
-
-fileInput.addEventListener("change", () => {
-  if (fileInput.files.length) {
-    handleFile(fileInput.files[0]);
-  }
-});
+fileInput.addEventListener("change", () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
 
 function handleFile(file) {
   if (!file.name.toLowerCase().endsWith(".zip")) {
@@ -76,8 +55,7 @@ function hideError() { errorBox.hidden = true; }
 
 let loadingInterval = null;
 
-scanBtn.addEventListener("click", async (e) => {
-  e.stopPropagation(); // Stop event bubbling to dropzone
+scanBtn.addEventListener("click", async () => {
   if (!selectedFile) return;
   hideError();
   scanBtn.disabled = true;
@@ -117,24 +95,11 @@ scanBtn.addEventListener("click", async (e) => {
 
 function renderResults(data) {
   currentData = data;
-  
-  // Normalize Windows paths (\) to Unix paths (/) across all returned items
-  if (currentData.issues) {
-    currentData.issues.forEach((i) => i.file = i.file.replace(/\\/g, "/"));
-  }
-  if (currentData.sources) {
-    const normalizedSources = {};
-    for (const [key, val] of Object.entries(currentData.sources)) {
-      normalizedSources[key.replace(/\\/g, "/")] = val;
-    }
-    currentData.sources = normalizedSources;
-  }
-
   activeCategory = "all";
   activeSeverity = "all";
   searchTerm = "";
   document.getElementById("issue-search").value = "";
-  
+  selectedIssue = null;
   document.querySelectorAll(".cat-btn").forEach((b) => setActive(b, b.dataset.value === "all"));
   document.querySelectorAll(".sev-btn").forEach((b) => setActive(b, b.dataset.value === "all"));
 
@@ -155,7 +120,7 @@ function renderResults(data) {
   document.getElementById("stat-errors").textContent = data.files_with_errors ?? "—";
   document.getElementById("stat-total").textContent = data.summary.total;
 
-  applyFilters(true); // Automatically selects and renders the top issue
+  applyFilters();
 }
 
 function setBar(name, value) {
@@ -206,7 +171,7 @@ const SEV_STYLES = {
   info: { border: "border-l-blue-500", bg: "bg-blue-500/10", text: "text-blue-400" },
 };
 
-function applyFilters(autoSelectFirst = false) {
+function applyFilters() {
   if (!currentData) return;
   const feed = document.getElementById("issues-feed");
 
@@ -235,11 +200,6 @@ function applyFilters(autoSelectFirst = false) {
     return;
   }
 
-  if (autoSelectFirst && list.length > 0) {
-    selectedIssue = list[0];
-    renderCodeViewer(selectedIssue);
-  }
-
   feed.innerHTML = list.map((issue, idx) => {
     const s = SEV_STYLES[issue.severity] || SEV_STYLES.info;
     const isSelected = selectedIssue === issue;
@@ -262,7 +222,7 @@ function applyFilters(autoSelectFirst = false) {
   feed.querySelectorAll(".issue-card").forEach((card) => {
     card.addEventListener("click", () => {
       selectedIssue = list[Number(card.dataset.idx)];
-      applyFilters(false);
+      applyFilters();
       renderCodeViewer(selectedIssue);
     });
   });
@@ -271,17 +231,13 @@ function applyFilters(autoSelectFirst = false) {
 /* ---------- Code viewer ---------- */
 
 function renderCodeViewer(issue) {
-  if (!issue) return;
-
   const viewport = document.getElementById("code-viewport");
   const filenameEl = document.getElementById("viewer-filename");
   const statusParsed = document.getElementById("status-parsed");
   const statusLine = document.getElementById("status-lineno");
 
-  const sourcePath = issue.file.replace(/\\/g, "/");
-  const source = currentData.sources && currentData.sources[sourcePath];
-  
-  filenameEl.textContent = sourcePath;
+  const source = currentData.sources && currentData.sources[issue.file];
+  filenameEl.textContent = issue.file;
   statusLine.textContent = `Line ${issue.line}`;
   statusParsed.innerHTML = `<i class="fa-solid fa-check-double mr-1.5"></i>AST parsed`;
   statusParsed.className = "flex items-center text-emerald-500";
@@ -295,7 +251,7 @@ function renderCodeViewer(issue) {
   const rows = lines.map((line, i) => {
     const lineNum = i + 1;
     const isTarget = lineNum === issue.line;
-    const highlightClass = isTarget ? `line-highlight-${issue.severity} bg-rose-950/40 border-l-2 border-rose-500` : "";
+    const highlightClass = isTarget ? `line-highlight-${issue.severity}` : "";
     const escaped = escapeHtml(line) || " ";
     const banner = isTarget ? `
       <div class="mx-8 my-1 p-2 rounded bg-surface-card border border-surface-border flex items-start space-x-2 text-[11px]">
@@ -307,7 +263,7 @@ function renderCodeViewer(issue) {
       </div>
     ` : "";
     return `
-      <div id="line-${lineNum}" class="flex flex-col ${highlightClass}">
+      <div class="flex flex-col ${highlightClass}">
         <div class="flex items-start py-0.5 px-2">
           <span class="w-8 text-right pr-3 text-slate-600 select-none text-[10px] shrink-0">${lineNum}</span>
           <pre class="flex-1 whitespace-pre-wrap m-0"><code class="language-python">${escaped}</code></pre>
@@ -321,11 +277,6 @@ function renderCodeViewer(issue) {
   viewport.querySelectorAll("code").forEach((block) => {
     if (window.hljs) hljs.highlightElement(block);
   });
-
-  const targetElement = document.getElementById(`line-${issue.line}`);
-  if (targetElement) {
-    targetElement.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
 }
 
 /* ---------- History (localStorage) ---------- */
