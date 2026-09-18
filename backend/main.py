@@ -1,12 +1,3 @@
-"""
-CodeLens web backend.
-
-POST /api/scan  — multipart upload, field name "project" (a .zip of a
-Python project). Extracts it into a temp dir (with zip-slip protection),
-runs the same scanning engine used by the CLI, returns JSON results, then
-deletes the temp dir. Nothing is persisted between requests.
-"""
-
 from __future__ import annotations
 
 import os
@@ -14,6 +5,7 @@ import shutil
 import tempfile
 import zipfile
 from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -225,7 +217,13 @@ async def health():
     return {"status": "ok"}
 
 
-# Serve the frontend (index.html, app.js, style.css) from the same app so
-# the whole thing deploys as one web service.
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+# Dynamically resolve static files directory across local and cloud environments
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+# Fallback check if static directory is located at project root instead of backend/
+if not STATIC_DIR.exists():
+    STATIC_DIR = BASE_DIR.parent / "static"
+
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
