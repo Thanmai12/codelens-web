@@ -1,146 +1,173 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full bg-[#070A10] text-slate-100 antialiased">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CodeLens</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CodeLens — Python Quality &amp; Security Scanner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter','sans-serif'], mono: ['Fira Code','monospace'] },
+          colors: {
+            surface: { base:'#070A10', panel:'#0D131E', card:'#121A29', border:'#1E293B', hover:'#1A2538' },
+            accent: { blue:'#3B82F6', cyan:'#06B6D4', emerald:'#10B981', amber:'#F59E0B', rose:'#F43F5E' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #070A10; }
+    ::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    .line-highlight-critical, .line-highlight-error { background: rgba(244,63,94,0.12); border-left: 3px solid #F43F5E; }
+    .line-highlight-warning { background: rgba(245,158,11,0.12); border-left: 3px solid #F59E0B; }
+    .line-highlight-info { background: rgba(59,130,246,0.12); border-left: 3px solid #3B82F6; }
+    .hljs { background: transparent !important; }
+    [hidden] { display: none !important; }
+  </style>
 </head>
-<body>
-  <div class="shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <svg class="mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+<body class="h-full flex flex-col font-sans overflow-hidden bg-surface-base text-slate-100">
+
+  <header class="h-14 border-b border-surface-border/80 bg-surface-panel/90 px-4 flex items-center justify-between shrink-0 z-20">
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-2.5">
+        <svg class="w-6 h-6 text-accent-blue" viewBox="0 0 32 32" fill="none">
           <circle cx="14" cy="14" r="9" stroke="currentColor" stroke-width="2"/>
           <circle cx="14" cy="14" r="4" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
           <line x1="20.5" y1="20.5" x2="27" y2="27" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <span class="wordmark">CodeLens</span>
+        <span class="font-bold text-base tracking-tight">CodeLens</span>
       </div>
-      <nav class="nav">
-        <button class="nav-item active" data-view="home">Home</button>
-        <button class="nav-item" data-view="home">Scan project</button>
-        <button class="nav-item" data-view="history">History</button>
-        <button class="nav-item" data-view="settings">Settings</button>
-      </nav>
-      <div class="sidebar-foot">Python quality &amp; security scanner</div>
-    </aside>
+      <div class="h-4 w-px bg-surface-border hidden sm:block"></div>
+      <div class="hidden sm:flex items-center bg-surface-card border border-surface-border rounded-md px-2.5 py-1.5">
+        <i class="fa-solid fa-magnifying-glass text-slate-500 text-xs mr-2"></i>
+        <input id="issue-search" type="text" placeholder="Search issues..." class="bg-transparent text-xs text-slate-200 placeholder-slate-500 outline-none w-44">
+      </div>
+    </div>
+    <nav class="flex items-center space-x-1 text-xs font-medium text-slate-400">
+      <button class="nav-link px-3 py-1.5 rounded-md hover:bg-surface-hover hover:text-white transition active" data-view="dashboard">Dashboard</button>
+      <button class="nav-link px-3 py-1.5 rounded-md hover:bg-surface-hover hover:text-white transition" data-view="history">History</button>
+      <a href="https://github.com/Thanmai12/codelens-web" target="_blank" class="px-3 py-1.5 rounded-md hover:bg-surface-hover hover:text-white transition"><i class="fa-brands fa-github mr-1"></i>GitHub</a>
+      <div class="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[11px] font-semibold text-slate-300 ml-2">TG</div>
+    </nav>
+  </header>
 
-    <main class="content">
-      <section id="view-home">
-        <header class="page-head">
+  <main id="view-dashboard" class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- Top metrics row -->
+    <section class="border-b border-surface-border bg-surface-panel/40 p-3.5 shrink-0">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
+
+        <div class="lg:col-span-3 bg-surface-card border border-surface-border rounded-xl p-3 flex items-center space-x-3.5">
+          <div class="relative w-14 h-14 shrink-0">
+            <svg class="w-full h-full -rotate-90" viewBox="0 0 36 36">
+              <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              <path id="score-arc" class="text-accent-blue" stroke-dasharray="0, 100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <span id="score-num" class="absolute inset-0 flex items-center justify-center text-sm font-bold font-mono">—</span>
+          </div>
           <div>
-            <h1>Analyze your Python project</h1>
-            <p class="sub">Find code quality issues and security vulnerabilities before they reach production.</p>
-          </div>
-        </header>
-
-        <div class="upload-row">
-          <div class="frame" id="dropzone">
-            <span class="corner tl"></span><span class="corner tr"></span>
-            <span class="corner bl"></span><span class="corner br"></span>
-            <div class="frame-content">
-              <p class="frame-title">Drop your project .zip here</p>
-              <p class="frame-hint">or click to choose a file. Max 20&nbsp;MB.</p>
-              <input type="file" id="file-input" accept=".zip" hidden />
-            </div>
-          </div>
-
-          <div class="quick-panel">
-            <div class="panel-label">Selected file</div>
-            <div id="file-name" class="file-name">No file chosen</div>
-            <button id="scan-btn" disabled>Analyze project</button>
-            <div id="error-box" class="error-box" hidden></div>
+            <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Quality score</div>
+            <div id="score-label" class="text-xs font-semibold text-slate-500 mt-0.5">No scan yet</div>
           </div>
         </div>
 
-        <section id="loading" class="frame loading-frame" hidden>
-          <span class="corner tl"></span><span class="corner tr"></span>
-          <span class="corner bl"></span><span class="corner br"></span>
-          <div class="scanline"></div>
-          <p class="loading-text" id="loading-text">Reading files</p>
-        </section>
+        <div class="lg:col-span-4 bg-surface-card border border-surface-border rounded-xl p-3 space-y-2 flex flex-col justify-center">
+          <div>
+            <div class="flex justify-between text-[11px] font-medium mb-1"><span class="text-slate-300">Security</span><span id="num-security" class="font-mono text-slate-500">—</span></div>
+            <div class="h-1.5 bg-surface-border rounded-full overflow-hidden"><div id="bar-security" class="h-full bg-accent-blue rounded-full" style="width:0%"></div></div>
+          </div>
+          <div>
+            <div class="flex justify-between text-[11px] font-medium mb-1"><span class="text-slate-300">Quality</span><span id="num-quality" class="font-mono text-slate-500">—</span></div>
+            <div class="h-1.5 bg-surface-border rounded-full overflow-hidden"><div id="bar-quality" class="h-full bg-accent-emerald rounded-full" style="width:0%"></div></div>
+          </div>
+          <div>
+            <div class="flex justify-between text-[11px] font-medium mb-1"><span class="text-slate-300">Complexity</span><span id="num-complexity" class="font-mono text-slate-500">—</span></div>
+            <div class="h-1.5 bg-surface-border rounded-full overflow-hidden"><div id="bar-complexity" class="h-full bg-accent-amber rounded-full" style="width:0%"></div></div>
+          </div>
+        </div>
 
-        <section id="results" hidden>
+        <div class="lg:col-span-3 bg-surface-card border border-surface-border rounded-xl p-3 grid grid-cols-2 gap-2.5 text-center">
+          <div><div id="stat-scanned" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Discovered</div></div>
+          <div><div id="stat-analyzed" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Analyzed</div></div>
+          <div><div id="stat-total" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Issues</div></div>
+          <div><div id="stat-errors" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Errors</div></div>
+        </div>
 
-          <div class="score-row">
-            <div class="score-ring-card">
-              <div class="ring" id="score-ring">
-                <span class="ring-num" id="score-num">—</span>
-                <span class="ring-den">/ 100</span>
-              </div>
-              <div class="ring-label">Code quality score</div>
-            </div>
-
-            <div class="subscore-card">
-              <div class="subscore-row">
-                <span class="subscore-label">Security</span>
-                <div class="bar"><div class="bar-fill security" id="bar-security"></div></div>
-                <span class="subscore-num" id="num-security">—</span>
-              </div>
-              <div class="subscore-row">
-                <span class="subscore-label">Quality</span>
-                <div class="bar"><div class="bar-fill quality" id="bar-quality"></div></div>
-                <span class="subscore-num" id="num-quality">—</span>
-              </div>
-              <div class="subscore-row">
-                <span class="subscore-label">Complexity</span>
-                <div class="bar"><div class="bar-fill complexity" id="bar-complexity"></div></div>
-                <span class="subscore-num" id="num-complexity">—</span>
-              </div>
-            </div>
-
-            <div class="stats-card">
-              <div class="stat-item"><span class="stat-num" id="stat-scanned">—</span><span class="stat-label">Files discovered</span></div>
-              <div class="stat-item"><span class="stat-num" id="stat-analyzed">—</span><span class="stat-label">Files analyzed</span></div>
-              <div class="stat-item"><span class="stat-num" id="stat-errors">—</span><span class="stat-label">Files with errors</span></div>
-              <div class="stat-item"><span class="stat-num" id="stat-total">—</span><span class="stat-label">Issues found</span></div>
+        <div class="lg:col-span-2 bg-surface-card border border-dashed border-surface-border rounded-xl p-2.5 flex flex-col justify-center" id="dropzone">
+          <input type="file" id="file-input" accept=".zip" hidden />
+          <div class="flex items-center space-x-2 cursor-pointer" id="dropzone-inner">
+            <i class="fa-solid fa-file-zipper text-accent-blue"></i>
+            <div class="flex-1 min-w-0">
+              <div id="file-name" class="text-[11px] text-slate-400 truncate">Drop or click .zip</div>
             </div>
           </div>
+          <button id="scan-btn" disabled class="mt-2 w-full bg-accent-blue hover:bg-blue-500 disabled:bg-surface-border disabled:text-slate-500 text-white text-xs font-semibold py-1.5 rounded-md transition">Analyze</button>
+        </div>
+      </div>
+      <div id="error-box" class="mt-2 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-md px-3 py-2" hidden></div>
+      <div id="loading-box" class="mt-2 text-xs text-slate-400 font-mono" hidden><i class="fa-solid fa-circle-notch fa-spin mr-2"></i><span id="loading-text">Reading files</span></div>
+    </section>
 
-          <div class="severity-row" id="severity-row"></div>
-
-          <div class="filters">
-            <div class="filter-group" id="filter-category">
-              <button class="filter-btn active" data-value="all">All</button>
-              <button class="filter-btn" data-value="security">Security</button>
-              <button class="filter-btn" data-value="quality">Quality</button>
-              <button class="filter-btn" data-value="errors">Parse errors</button>
-            </div>
-            <div class="filter-group" id="filter-severity">
-              <button class="filter-btn active" data-value="all">All severities</button>
-              <button class="filter-btn" data-value="critical">Critical</button>
-              <button class="filter-btn" data-value="error">Error</button>
-              <button class="filter-btn" data-value="warning">Warning</button>
-              <button class="filter-btn" data-value="info">Info</button>
-            </div>
+    <!-- Body: issues + code viewer -->
+    <div class="flex flex-1 overflow-hidden">
+      <section class="w-full lg:w-[420px] shrink-0 border-r border-surface-border flex flex-col overflow-hidden">
+        <div class="p-3 border-b border-surface-border shrink-0">
+          <div class="flex flex-wrap gap-1.5 mb-2" id="filter-category">
+            <button class="cat-btn active px-2.5 py-1 rounded-full text-[11px] font-medium bg-accent-blue text-white" data-value="all">All</button>
+            <button class="cat-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="security">Security</button>
+            <button class="cat-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="quality">Quality</button>
+            <button class="cat-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="errors">Parse errors</button>
           </div>
-
-          <div id="issue-list" class="ledger"></div>
-        </section>
+          <div class="flex flex-wrap gap-1.5" id="filter-severity">
+            <button class="sev-btn active px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-hover text-slate-200 border border-surface-border" data-value="all">All severities</button>
+            <button class="sev-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="critical">Critical</button>
+            <button class="sev-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="error">Error</button>
+            <button class="sev-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="warning">Warning</button>
+            <button class="sev-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="info">Info</button>
+          </div>
+        </div>
+        <div id="issues-feed" class="flex-1 overflow-y-auto p-3 space-y-2"></div>
       </section>
 
-      <section id="view-history" hidden>
-        <header class="page-head"><h1>Scan history</h1><p class="sub">Stored locally in this browser only.</p></header>
-        <div id="history-list" class="ledger"></div>
+      <section class="hidden lg:flex flex-1 flex-col overflow-hidden bg-surface-base">
+        <div class="h-9 border-b border-surface-border flex items-center px-3 shrink-0">
+          <i class="fa-brands fa-python text-accent-blue text-xs mr-2"></i>
+          <span id="viewer-filename" class="text-xs font-mono text-slate-300">No file selected</span>
+        </div>
+        <div class="flex-1 overflow-auto font-mono text-xs leading-6 p-4" id="code-viewport">
+          <div class="text-slate-600 text-center mt-10">Run a scan, then click an issue to view its source.</div>
+        </div>
+        <div class="h-8 bg-surface-panel border-t border-surface-border px-4 flex items-center justify-between text-[11px] font-mono text-slate-500 shrink-0">
+          <div class="flex items-center space-x-4">
+            <span id="status-parsed" class="flex items-center text-slate-600"><i class="fa-solid fa-check-double mr-1.5"></i>Idle</span>
+            <span>Python 3</span>
+            <span>UTF-8</span>
+          </div>
+          <span id="status-lineno" class="text-slate-600">—</span>
+        </div>
       </section>
-
-      <section id="view-settings" hidden>
-        <header class="page-head"><h1>Settings</h1><p class="sub">Nothing configurable yet — thresholds are fixed in the backend for now.</p></header>
-      </section>
-    </main>
-  </div>
-
-  <div id="detail-overlay" class="overlay" hidden>
-    <div class="detail-card">
-      <button class="detail-close" id="detail-close">&times;</button>
-      <div id="detail-body"></div>
     </div>
-  </div>
+  </main>
+
+  <main id="view-history" class="flex-1 overflow-y-auto p-6" hidden>
+    <h1 class="text-lg font-bold mb-1">Scan history</h1>
+    <p class="text-xs text-slate-500 mb-4">Stored locally in this browser only.</p>
+    <div id="history-list" class="space-y-2"></div>
+  </main>
 
   <script src="app.js"></script>
 </body>
 </html>
+
