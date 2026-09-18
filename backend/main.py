@@ -56,7 +56,8 @@ MAX_FILES = 2000
 
 app = FastAPI(title="CodeLens")
 
-
+# Same-origin in production (frontend is served by this app), but keep CORS
+# open so the static frontend can also be hosted separately if needed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -109,12 +110,15 @@ async def scan_project(project: UploadFile = File(...)):
         ]
         engine = Engine(checkers)
 
+        # Report paths relative to the uploaded project root, not the temp dir
         def relativize(p: str) -> str:
             try:
                 return os.path.relpath(p, extract_dir)
             except ValueError:
                 return p
 
+        # Discover files BEFORE scanning so we can always report how many
+        # .py files were actually found, even if something later goes wrong.
         discovered = engine.discover_files(extract_dir)
         discovered_relative = [relativize(p) for p in discovered]
 
@@ -140,7 +144,9 @@ async def scan_project(project: UploadFile = File(...)):
         try:
             issues, errors = engine.scan(extract_dir)
         except Exception as e:
-           
+            # Never let an unexpected exception produce an opaque 500 with no
+            # useful body — always tell the caller what files WERE found even
+            # if the scan itself blew up.
             return JSONResponse(
                 status_code=500,
                 content={
@@ -176,6 +182,30 @@ async def scan_project(project: UploadFile = File(...)):
         files_with_errors = len(result_errors)
         files_analyzed = len(discovered) - files_with_errors
 
+        # Return real source for every file that has at least one issue, so
+        # the frontend can show an actual code viewer instead of fabricated
+        # code. Capped per-file and in total count so a huge project can't
+        # blow up the response.
+        MAX_SOURCE_FILES = 30
+        MAX_SOURCE_BYTES = 60_000
+        rel_to_abs = dict(zip(discovered_relative, discovered))
+        files_with_issues = []
+        for i in result_issues:
+            if i["file"] not in files_with_issues:
+                files_with_issues.append(i["file"])
+
+        sources = {}
+        for rel in files_with_issues[:MAX_SOURCE_FILES]:
+            abs_path = rel_to_abs.get(rel)
+            if not abs_path:
+                continue
+            try:
+                with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+                    text = f.read(MAX_SOURCE_BYTES)
+                sources[rel] = text
+            except OSError:
+                continue
+
         return JSONResponse({
             "summary": summary,
             "score": compute_scores(result_issues),
@@ -186,6 +216,7 @@ async def scan_project(project: UploadFile = File(...)):
             "files_with_errors": files_with_errors,
             "files_list": discovered_relative,
             "checkers_run": [c.name for c in checkers],
+            "sources": sources,
         })
 
 
@@ -194,6 +225,7 @@ async def health():
     return {"status": "ok"}
 
 
-
+# Serve the frontend (index.html, app.js, style.css) from the same app so
+# the whole thing deploys as one web service.
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
