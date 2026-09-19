@@ -1,12 +1,3 @@
-"""
-CodeLens CLI.
-
-Usage:
-    codelens scan <path> [--format text|json] [--fail-on warning|error|critical]
-                         [--only quality|security] [--complexity-threshold N]
-                         [--long-function-threshold N] [--min-duplicate-lines N]
-"""
-
 from __future__ import annotations
 
 import argparse
