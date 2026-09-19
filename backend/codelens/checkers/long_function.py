@@ -1,9 +1,3 @@
-"""
-Flags functions that exceed a configurable line-count threshold.
-Length is measured from the `def` line to the last line of the function
-body (using ast's end_lineno, available in Python 3.8+).
-"""
-
 from __future__ import annotations
 
 import ast
