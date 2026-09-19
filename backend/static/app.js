@@ -10,6 +10,7 @@ let selectedFile = null;
 let currentData = null;
 let activeCategory = "all";
 let activeSeverity = "all";
+let activeFileFilter = null;
 let selectedIssue = null;
 let searchTerm = "";
 
@@ -52,6 +53,13 @@ function handleFile(file) {
 
 function showError(msg) { errorBox.textContent = msg; errorBox.hidden = false; }
 function hideError() { errorBox.hidden = true; }
+
+window.addEventListener("error", (e) => {
+  showError(`Unexpected error: ${e.message}`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  showError(`Unexpected error: ${e.reason}`);
+});
 
 let loadingInterval = null;
 
@@ -97,6 +105,7 @@ function renderResults(data) {
   currentData = data;
   activeCategory = "all";
   activeSeverity = "all";
+  activeFileFilter = null;
   searchTerm = "";
   document.getElementById("issue-search").value = "";
   selectedIssue = null;
@@ -147,6 +156,7 @@ document.getElementById("filter-category").addEventListener("click", (e) => {
   const btn = e.target.closest(".cat-btn");
   if (!btn) return;
   activeCategory = btn.dataset.value;
+  activeFileFilter = null;
   document.querySelectorAll(".cat-btn").forEach((b) => setActive(b, b === btn));
   applyFilters();
 });
@@ -175,6 +185,11 @@ function applyFilters() {
   if (!currentData) return;
   const feed = document.getElementById("issues-feed");
 
+  if (activeCategory === "files") {
+    renderFileBreakdown(feed);
+    return;
+  }
+
   if (activeCategory === "errors") {
     const errs = currentData.parse_errors || [];
     if (!errs.length) {
@@ -192,6 +207,7 @@ function applyFilters() {
   let list = currentData.issues || [];
   if (activeCategory !== "all") list = list.filter((i) => i.category === activeCategory);
   if (activeSeverity !== "all") list = list.filter((i) => i.severity === activeSeverity);
+  if (activeFileFilter) list = list.filter((i) => i.file === activeFileFilter);
   if (searchTerm) list = list.filter((i) => i.message.toLowerCase().includes(searchTerm) || i.file.toLowerCase().includes(searchTerm) || i.checker.toLowerCase().includes(searchTerm));
   list = [...list].sort((a, b) => (SEV_ORDER[a.severity] - SEV_ORDER[b.severity]) || a.file.localeCompare(b.file));
 
@@ -224,6 +240,51 @@ function applyFilters() {
       selectedIssue = list[Number(card.dataset.idx)];
       applyFilters();
       renderCodeViewer(selectedIssue);
+    });
+  });
+}
+
+function renderFileBreakdown(feed) {
+  const files = currentData.files_list || [];
+  const issues = currentData.issues || [];
+  const stats = files.map((file) => {
+    const fileIssues = issues.filter((i) => i.file === file);
+    return {
+      file,
+      total: fileIssues.length,
+      security: fileIssues.filter((i) => i.category === "security").length,
+      quality: fileIssues.filter((i) => i.category === "quality").length,
+      critical: fileIssues.filter((i) => i.severity === "critical").length,
+    };
+  }).sort((a, b) => b.total - a.total);
+
+  if (!stats.length) {
+    feed.innerHTML = `<div class="text-slate-600 text-xs text-center mt-8">No files scanned.</div>`;
+    return;
+  }
+
+  feed.innerHTML = stats.map((s, idx) => `
+    <div class="file-row p-3 rounded-lg border border-surface-border bg-surface-panel/40 hover:bg-surface-card cursor-pointer transition" data-idx="${idx}">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-mono text-slate-200 truncate">${escapeHtml(s.file)}</span>
+        <span class="text-[10px] font-mono ${s.total ? "text-slate-300" : "text-emerald-500"}">${s.total ? s.total + " issue" + (s.total === 1 ? "" : "s") : "clean"}</span>
+      </div>
+      ${s.total ? `<div class="flex items-center space-x-3 mt-1.5 text-[10px] text-slate-500">
+        ${s.critical ? `<span class="text-rose-400">${s.critical} critical</span>` : ""}
+        ${s.security ? `<span>${s.security} security</span>` : ""}
+        ${s.quality ? `<span>${s.quality} quality</span>` : ""}
+      </div>` : ""}
+    </div>
+  `).join("");
+
+  feed.querySelectorAll(".file-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const s = stats[Number(row.dataset.idx)];
+      if (s.total === 0) return; // nothing to drill into
+      activeFileFilter = s.file;
+      activeCategory = "all";
+      document.querySelectorAll(".cat-btn").forEach((b) => setActive(b, b.dataset.value === "all"));
+      applyFilters();
     });
   });
 }
