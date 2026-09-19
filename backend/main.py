@@ -1,16 +1,6 @@
-"""
-CodeLens web backend.
-
-POST /api/scan  — multipart upload, field name "project" (a .zip of a
-Python project). Extracts it into a temp dir (with zip-slip protection),
-runs the same scanning engine used by the CLI, returns JSON results, then
-deletes the temp dir. Nothing is persisted between requests.
-"""
-
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
 import zipfile
 from dataclasses import asdict
@@ -25,8 +15,17 @@ from codelens.checkers.duplicate_code import DuplicateCodeChecker
 from codelens.checkers.long_function import LongFunctionChecker
 from codelens.checkers.secrets import SecretsChecker
 from codelens.checkers.unused_imports import UnusedImportsChecker
+from codelens.checkers.quality_extra import (
+    DeepNestingChecker, TooManyParametersChecker, LongFileChecker,
+    LargeClassChecker, MutableDefaultArgChecker, BroadExceptionChecker,
+)
+from codelens.checkers.security_extra import (
+    DangerousExecChecker, UnsafeSubprocessChecker, WeakCryptoChecker,
+    UnsafeDeserializationChecker, SqlInjectionChecker,
+)
 from codelens.engine import Engine
 from codelens.scoring import compute_scores
+from models import IssueModel, ScanError, ScanResult, ScanSummary, ScoreBreakdown, empty_scan_result
 
 CHECKER_EXPLANATIONS = {
     "hardcoded-secret": {
@@ -49,10 +48,81 @@ CHECKER_EXPLANATIONS = {
         "why": "Unused imports add noise, slow down readability, and can mask genuinely unused code.",
         "fix": "Remove the import, or add a `# noqa` comment if it's intentionally kept (e.g. for re-export).",
     },
+    "deep-nesting": {
+        "why": "Deeply nested code is hard to read and reason about — each level of nesting multiplies the mental state a reader has to track.",
+        "fix": "Use early returns/continues to flatten conditionals, or extract inner blocks into their own named functions.",
+    },
+    "too-many-parameters": {
+        "why": "Functions with many parameters are hard to call correctly and hard to remember the order of.",
+        "fix": "Group related parameters into a dataclass or config object, or split the function into smaller ones.",
+    },
+    "long-file": {
+        "why": "Very large files usually mix multiple responsibilities, making them harder to navigate and to review changes in.",
+        "fix": "Split the file along its natural seams — e.g. one module per class or per feature area.",
+    },
+    "large-class": {
+        "why": "A large class often has too many responsibilities, which violates single-responsibility and makes it harder to test in isolation.",
+        "fix": "Extract cohesive groups of methods into their own smaller classes.",
+    },
+    "mutable-default-arg": {
+        "why": "A mutable default argument (list/dict/set) is created once, at function-definition time, and shared across every call that doesn't override it — mutating it in one call leaks into all future calls.",
+        "fix": "Use `None` as the default and create the mutable object inside the function body instead.",
+    },
+    "broad-exception": {
+        "why": "Catching every exception type (or catching and silently passing) hides real bugs and makes debugging much harder.",
+        "fix": "Catch the specific exception types you actually expect, and log or handle the failure instead of silently passing.",
+    },
+    "dangerous-exec": {
+        "why": "eval() and exec() run arbitrary code — if any part of the input can be influenced by a user, this is a direct code-execution vulnerability.",
+        "fix": "Avoid eval/exec entirely; use safer alternatives like `ast.literal_eval` for data, or a proper parser/dispatch table for logic.",
+    },
+    "unsafe-subprocess": {
+        "why": "shell=True runs the command through a shell, so any untrusted data in the command string can inject additional shell commands.",
+        "fix": "Pass the command as a list of arguments and use shell=False (the default), avoiding shell interpretation entirely.",
+    },
+    "weak-crypto": {
+        "why": "MD5 and SHA-1 have known collision weaknesses and should not be relied on anywhere security matters (passwords, signatures, integrity checks).",
+        "fix": "Use SHA-256 or better for integrity/signatures, and a dedicated password-hashing algorithm (bcrypt, scrypt, or argon2) for passwords.",
+    },
+    "unsafe-deserialization": {
+        "why": "Unpickling data can execute arbitrary code as a side effect of deserialization — it is not a safe format for untrusted input.",
+        "fix": "Use a safe data format like JSON for untrusted input, or verify the source is fully trusted before unpickling.",
+    },
+    "sql-injection-risk": {
+        "why": "Building a SQL query by concatenating or interpolating strings lets untrusted input change the query's structure, not just its data.",
+        "fix": "Use parameterized queries (e.g. `cursor.execute(\"... WHERE id = %s\", (value,))`) instead of building the query string yourself.",
+    },
 }
 
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+# Stable rule identifiers, one per checker. These are part of the public API
+# contract now (frontend and any future consumer can key off them), so once
+# assigned, an ID must never be reassigned to a different checker -- only
+# appended to. Numbering is sequential per category prefix, in no particular
+# priority order beyond "the order these checkers were originally written."
+RULE_IDS = {
+    "hardcoded-secret": "SEC001",
+    "complexity": "QUAL001",
+    "long-function": "QUAL002",
+    "duplicate-code": "QUAL003",
+    "unused-imports": "QUAL004",
+    "deep-nesting": "QUAL005",
+    "too-many-parameters": "QUAL006",
+    "long-file": "QUAL007",
+    "large-class": "QUAL008",
+    "mutable-default-arg": "QUAL009",
+    "broad-exception": "QUAL010",
+    "dangerous-exec": "SEC002",
+    "unsafe-subprocess": "SEC003",
+    "weak-crypto": "SEC004",
+    "unsafe-deserialization": "SEC005",
+    "sql-injection-risk": "SEC006",
+}
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB, compressed upload size
 MAX_FILES = 2000
+MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024  # 200 MB, guards against zip bombs
+MAX_SOURCE_FILES = 30
+MAX_SOURCE_BYTES = 60_000
 
 app = FastAPI(title="CodeLens")
 
@@ -67,16 +137,50 @@ app.add_middleware(
 
 
 def _safe_extract(zf: zipfile.ZipFile, dest: str) -> None:
-    """Extract a zip while refusing path traversal ('zip slip') entries."""
+    """
+    Extract a zip while refusing:
+      - path traversal ("zip slip") entries that would write outside dest
+      - a decompression-bomb payload: a small compressed file that expands
+        to an unreasonable amount of data on disk
+    """
     dest_root = os.path.realpath(dest)
+    total_uncompressed = 0
     for member in zf.infolist():
         member_path = os.path.realpath(os.path.join(dest, member.filename))
         if not member_path.startswith(dest_root + os.sep) and member_path != dest_root:
             raise HTTPException(400, f"Unsafe path in zip: {member.filename}")
+        total_uncompressed += member.file_size
+        if total_uncompressed > MAX_UNCOMPRESSED_BYTES:
+            raise HTTPException(
+                400,
+                f"Zip expands to more than {MAX_UNCOMPRESSED_BYTES // (1024*1024)} MB uncompressed — refusing to extract.",
+            )
     zf.extractall(dest)
 
 
-@app.post("/api/scan")
+def _run_checkers():
+    """One place that defines which checkers run on every scan."""
+    return [
+        ComplexityChecker(),
+        LongFunctionChecker(),
+        DuplicateCodeChecker(),
+        UnusedImportsChecker(),
+        SecretsChecker(),
+        DeepNestingChecker(),
+        TooManyParametersChecker(),
+        LongFileChecker(),
+        LargeClassChecker(),
+        MutableDefaultArgChecker(),
+        BroadExceptionChecker(),
+        DangerousExecChecker(),
+        UnsafeSubprocessChecker(),
+        WeakCryptoChecker(),
+        UnsafeDeserializationChecker(),
+        SqlInjectionChecker(),
+    ]
+
+
+@app.post("/api/scan", response_model=ScanResult)
 async def scan_project(project: UploadFile = File(...)):
     if not project.filename.lower().endswith(".zip"):
         raise HTTPException(400, "Please upload a .zip file of your project.")
@@ -101,45 +205,24 @@ async def scan_project(project: UploadFile = File(...)):
         except zipfile.BadZipFile:
             raise HTTPException(400, "That doesn't look like a valid zip file.")
 
-        checkers = [
-            ComplexityChecker(),
-            LongFunctionChecker(),
-            DuplicateCodeChecker(),
-            UnusedImportsChecker(),
-            SecretsChecker(),
-        ]
-        engine = Engine(checkers)
+        engine = Engine(_run_checkers())
 
-        # Report paths relative to the uploaded project root, not the temp dir
         def relativize(p: str) -> str:
             try:
                 return os.path.relpath(p, extract_dir)
             except ValueError:
                 return p
 
-        # Discover files BEFORE scanning so we can always report how many
-        # .py files were actually found, even if something later goes wrong.
         discovered = engine.discover_files(extract_dir)
         discovered_relative = [relativize(p) for p in discovered]
 
         if not discovered:
-            return JSONResponse({
-                "summary": {"total": 0, "quality": 0, "security": 0, "critical": 0,
-                            "error": 0, "warning": 0, "info": 0},
-                "score": {"overall": 100, "security": 100, "quality": 100, "complexity": 100},
-                "issues": [],
-                "parse_errors": [],
-                "files_scanned": 0,
-                "files_analyzed": 0,
-                "files_with_errors": 0,
-                "files_list": [],
-                "debug": (
-                    "No .py files were found in this upload. Check that your zip "
-                    "actually contains Python files at some level (not just inside "
-                    "another zip, and not only in an excluded folder like venv/ or "
-                    "node_modules/)."
-                ),
-            })
+            return empty_scan_result(
+                "No .py files were found in this upload. Check that your zip "
+                "actually contains Python files at some level (not just inside "
+                "another zip, and not only in an excluded folder like venv/ or "
+                "node_modules/)."
+            )
 
         try:
             issues, errors = engine.scan(extract_dir)
@@ -147,37 +230,45 @@ async def scan_project(project: UploadFile = File(...)):
             # Never let an unexpected exception produce an opaque 500 with no
             # useful body — always tell the caller what files WERE found even
             # if the scan itself blew up.
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": f"Scan crashed: {type(e).__name__}: {e}",
-                    "files_scanned": len(discovered),
-                    "files_list": discovered_relative,
-                },
+            err = ScanError(
+                error=f"Scan crashed: {type(e).__name__}: {e}",
+                files_scanned=len(discovered),
+                files_list=discovered_relative,
             )
+            return JSONResponse(status_code=500, content=err.model_dump())
 
-        result_issues = []
+        result_issues: list[IssueModel] = []
         for issue in issues:
             d = asdict(issue)
-            d["file"] = relativize(d["file"])
-            d["category"] = issue.category.value
-            d["severity"] = issue.severity.value
             explanation = CHECKER_EXPLANATIONS.get(issue.checker, {})
-            d["why"] = explanation.get("why", "")
-            d["fix"] = explanation.get("fix", "")
-            result_issues.append(d)
+            result_issues.append(IssueModel(
+                rule_id=RULE_IDS.get(issue.checker, "UNKNOWN"),
+                checker=d["checker"],
+                category=issue.category.value,
+                severity=issue.severity.value,
+                file=relativize(d["file"]),
+                line=d["line"],
+                message=d["message"],
+                snippet=d.get("snippet", ""),
+                column=d.get("column", 0),
+                why=explanation.get("why", ""),
+                fix=explanation.get("fix", ""),
+            ))
 
-        result_errors = [relativize(e.split(":", 1)[0]) + ":" + e.split(":", 1)[1] if ":" in e else e for e in errors]
+        result_errors = [
+            relativize(e.split(":", 1)[0]) + ":" + e.split(":", 1)[1] if ":" in e else e
+            for e in errors
+        ]
 
-        summary = {
-            "total": len(result_issues),
-            "quality": sum(1 for i in result_issues if i["category"] == "quality"),
-            "security": sum(1 for i in result_issues if i["category"] == "security"),
-            "critical": sum(1 for i in result_issues if i["severity"] == "critical"),
-            "error": sum(1 for i in result_issues if i["severity"] == "error"),
-            "warning": sum(1 for i in result_issues if i["severity"] == "warning"),
-            "info": sum(1 for i in result_issues if i["severity"] == "info"),
-        }
+        summary = ScanSummary(
+            total=len(result_issues),
+            quality=sum(1 for i in result_issues if i.category == "quality"),
+            security=sum(1 for i in result_issues if i.category == "security"),
+            critical=sum(1 for i in result_issues if i.severity == "critical"),
+            error=sum(1 for i in result_issues if i.severity == "error"),
+            warning=sum(1 for i in result_issues if i.severity == "warning"),
+            info=sum(1 for i in result_issues if i.severity == "info"),
+        )
 
         files_with_errors = len(result_errors)
         files_analyzed = len(discovered) - files_with_errors
@@ -186,38 +277,37 @@ async def scan_project(project: UploadFile = File(...)):
         # the frontend can show an actual code viewer instead of fabricated
         # code. Capped per-file and in total count so a huge project can't
         # blow up the response.
-        MAX_SOURCE_FILES = 30
-        MAX_SOURCE_BYTES = 60_000
         rel_to_abs = dict(zip(discovered_relative, discovered))
-        files_with_issues = []
+        files_with_issues: list[str] = []
         for i in result_issues:
-            if i["file"] not in files_with_issues:
-                files_with_issues.append(i["file"])
+            if i.file not in files_with_issues:
+                files_with_issues.append(i.file)
 
-        sources = {}
+        sources: dict[str, str] = {}
         for rel in files_with_issues[:MAX_SOURCE_FILES]:
             abs_path = rel_to_abs.get(rel)
             if not abs_path:
                 continue
             try:
                 with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
-                    text = f.read(MAX_SOURCE_BYTES)
-                sources[rel] = text
+                    sources[rel] = f.read(MAX_SOURCE_BYTES)
             except OSError:
                 continue
 
-        return JSONResponse({
-            "summary": summary,
-            "score": compute_scores(result_issues),
-            "issues": result_issues,
-            "parse_errors": result_errors,
-            "files_scanned": len(discovered),
-            "files_analyzed": files_analyzed,
-            "files_with_errors": files_with_errors,
-            "files_list": discovered_relative,
-            "checkers_run": [c.name for c in checkers],
-            "sources": sources,
-        })
+        score_dict = compute_scores([i.model_dump() for i in result_issues])
+
+        return ScanResult(
+            summary=summary,
+            score=ScoreBreakdown(**score_dict),
+            issues=result_issues,
+            parse_errors=result_errors,
+            files_scanned=len(discovered),
+            files_analyzed=files_analyzed,
+            files_with_errors=files_with_errors,
+            files_list=discovered_relative,
+            checkers_run=[c.name for c in engine.checkers],
+            sources=sources,
+        )
 
 
 @app.get("/api/health")
@@ -225,7 +315,7 @@ async def health():
     return {"status": "ok"}
 
 
-# Serve the frontend (index.html, app.js, style.css) from the same app so
-# the whole thing deploys as one web service.
+# Serve the frontend (index.html, app.js) from the same app so the whole
+# thing deploys as one web service.
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
