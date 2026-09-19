@@ -1,10 +1,3 @@
-"""
-The shared scanning engine. Owns file discovery + parsing; knows nothing
-about what any individual checker looks for. Checkers register themselves
-and the engine calls `check()` on each for every file, then `finalize()`
-once at the end for checkers that need a whole-codebase view.
-"""
-
 from __future__ import annotations
 
 import ast
