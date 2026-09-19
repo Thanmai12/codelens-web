@@ -1,11 +1,3 @@
-"""
-Additional code-quality checkers: deep nesting, too many parameters, long
-files, large classes, mutable default arguments, and overly broad exception
-handling. Grouped in one file (rather than one file per checker) since each
-is small and they share the "quality" category — splitting further would
-add navigation overhead without real benefit.
-"""
-
 from __future__ import annotations
 
 import ast
