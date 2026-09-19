@@ -1,22 +1,3 @@
-"""
-Hardcoded secrets checker.
-
-Two detection strategies, combined (like GitLeaks/TruffleHog):
-
-1. Regex signatures for known secret formats (AWS keys, GitHub tokens,
-   Slack tokens, generic API-key/password assignments, private key
-   headers, JWTs, etc).
-2. Shannon entropy scan over string literals assigned to
-   suspicious-looking variable names (key, token, secret, password, ...)
-   to catch secrets that don't match a known vendor pattern.
-
-False-positive guards:
-- Skips obvious placeholders (all-same-char, "xxxx", "<...>", "changeme",
-  "example", "your_api_key_here", etc.)
-- Skips strings shorter than a minimum length.
-- Honors `# noqa` / `# codelens: ignore` on the offending line.
-"""
-
 from __future__ import annotations
 
 import ast
