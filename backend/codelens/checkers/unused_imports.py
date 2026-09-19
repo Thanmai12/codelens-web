@@ -1,14 +1,3 @@
-"""
-Detects imported names that are never referenced elsewhere in the file.
-
-Approach: collect all import bindings (handling `import x`, `import x as y`,
-`from x import y`, `from x import y as z`), then walk the rest of the tree
-collecting every Name/Attribute load, and report bindings never used.
-Deliberately conservative: skips `__all__` exports and `# noqa` /
-`# codelens: ignore` comment lines to avoid false positives on
-re-export modules.
-"""
-
 from __future__ import annotations
 
 import ast
