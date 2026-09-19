@@ -1,11 +1,3 @@
-"""
-Cyclomatic complexity checker.
-
-Complexity = 1 + number of decision points (if/elif, for, while, except,
-boolean operators, comprehension `if` clauses, match cases). This is the
-standard McCabe formula, computed per function.
-"""
-
 from __future__ import annotations
 
 import ast
