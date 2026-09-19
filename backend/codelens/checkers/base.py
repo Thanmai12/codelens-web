@@ -1,13 +1,3 @@
-"""
-Base interface for all CodeLens checkers.
-
-Every checker (quality or security) plugs into the scanning engine by
-implementing this interface. This mirrors how ESLint rules or Pylint
-checkers work: the engine parses the file once, then hands the AST /
-source to each registered checker, collecting a flat list of Issue
-objects back.
-"""
-
 from __future__ import annotations
 
 import ast
