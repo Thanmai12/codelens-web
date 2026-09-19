@@ -1,5 +1,3 @@
-"""Formats a list of Issues for human (text) or machine (JSON) consumption."""
-
 from __future__ import annotations
 
 import json
