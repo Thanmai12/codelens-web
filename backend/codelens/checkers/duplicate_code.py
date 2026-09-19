@@ -1,17 +1,3 @@
-"""
-Cross-file duplicate code detection.
-
-Strategy: for every function/method body (min N lines, configurable),
-normalize the source (strip comments/whitespace, collapse variable-like
-identifiers are NOT renamed -- this is a straightforward textual/structural
-match, not a full clone-detection algorithm) and hash it. Bodies sharing a
-hash across two or more locations are reported as duplicates.
-
-This is a `finalize`-style checker: `check()` just collects candidate
-blocks per file, and `finalize()` (called once after all files are scanned)
-does the cross-file comparison and emits Issues.
-"""
-
 from __future__ import annotations
 
 import ast
