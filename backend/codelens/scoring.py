@@ -1,30 +1,3 @@
-"""
-Quality scoring.
-
-Turns a list of Issues into three 0-100 sub-scores (security, quality,
-complexity) plus an overall score. The formula is deliberately simple and
-explainable: each dimension starts at 100 and loses points per issue found
-in it, weighted by severity. This is not a statistically validated model —
-it's a transparent, defensible heuristic, which is the right trade-off for
-a tool whose whole point is explainability.
-
-Scoring formula (documented here so it can be explained in an interview):
-
-    score(dimension) = max(0, 100 - sum(penalty[severity] for each issue in dimension))
-
-    penalty = {critical: 20, error: 10, warning: 5, info: 2}
-
-Dimensions:
-    - security:   all issues from the 'hardcoded-secret' checker
-    - complexity: all issues from the 'complexity' checker specifically
-                  (kept separate from other quality issues because
-                  cyclomatic complexity is a distinct, well-known metric)
-    - quality:    all other quality-category issues (long-function,
-                  duplicate-code, unused-imports)
-
-Overall score is the unweighted average of the three sub-scores.
-"""
-
 from __future__ import annotations
 
 from typing import Iterable
