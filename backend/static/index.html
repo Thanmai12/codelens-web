@@ -67,7 +67,7 @@
 
     <!-- Top metrics row -->
     <section class="border-b border-surface-border bg-surface-panel/40 p-3.5 shrink-0">
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch mb-3">
 
         <div class="lg:col-span-3 bg-surface-card border border-surface-border rounded-xl p-3 flex items-center space-x-3.5">
           <div class="relative w-14 h-14 shrink-0">
@@ -83,7 +83,7 @@
           </div>
         </div>
 
-        <div class="lg:col-span-4 bg-surface-card border border-surface-border rounded-xl p-3 space-y-2 flex flex-col justify-center">
+        <div class="lg:col-span-5 bg-surface-card border border-surface-border rounded-xl p-3 space-y-2 flex flex-col justify-center">
           <div>
             <div class="flex justify-between text-[11px] font-medium mb-1"><span class="text-slate-300">Security</span><span id="num-security" class="font-mono text-slate-500">—</span></div>
             <div class="h-1.5 bg-surface-border rounded-full overflow-hidden"><div id="bar-security" class="h-full bg-accent-blue rounded-full" style="width:0%"></div></div>
@@ -98,23 +98,26 @@
           </div>
         </div>
 
-        <div class="lg:col-span-3 bg-surface-card border border-surface-border rounded-xl p-3 grid grid-cols-2 gap-2.5 text-center">
-          <div><div id="stat-scanned" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Discovered</div></div>
+        <div class="lg:col-span-4 bg-surface-card border border-surface-border rounded-xl p-3 grid grid-cols-4 gap-2.5 text-center items-center">
+          <div><div id="stat-scanned" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Found</div></div>
           <div><div id="stat-analyzed" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Analyzed</div></div>
           <div><div id="stat-total" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Issues</div></div>
           <div><div id="stat-errors" class="text-lg font-bold font-mono">—</div><div class="text-[10px] text-slate-500 uppercase tracking-wide">Errors</div></div>
         </div>
+      </div>
 
-        <div class="lg:col-span-2 bg-surface-card border border-dashed border-surface-border rounded-xl p-2.5 flex flex-col justify-center" id="dropzone">
-          <input type="file" id="file-input" accept=".zip" hidden />
-          <div class="flex items-center space-x-2 cursor-pointer" id="dropzone-inner">
+      <div class="border-2 border-dashed border-surface-border hover:border-accent-blue/50 rounded-xl p-4 flex items-center gap-4 transition" id="dropzone">
+        <input type="file" id="file-input" accept=".zip" hidden />
+        <div class="flex items-center gap-3 flex-1 cursor-pointer" id="dropzone-inner">
+          <div class="w-10 h-10 rounded-lg bg-surface-card border border-surface-border flex items-center justify-center shrink-0">
             <i class="fa-solid fa-file-zipper text-accent-blue"></i>
-            <div class="flex-1 min-w-0">
-              <div id="file-name" class="text-[11px] text-slate-400 truncate">Drop or click .zip</div>
-            </div>
           </div>
-          <button id="scan-btn" disabled class="mt-2 w-full bg-accent-blue hover:bg-blue-500 disabled:bg-surface-border disabled:text-slate-500 text-white text-xs font-semibold py-1.5 rounded-md transition">Analyze</button>
+          <div class="min-w-0">
+            <div id="file-name" class="text-sm text-slate-300 truncate">Drop your project .zip here, or click to browse</div>
+            <div class="text-[11px] text-slate-500">Max 20 MB &middot; analyzed in memory and discarded</div>
+          </div>
         </div>
+        <button id="scan-btn" disabled class="bg-accent-blue hover:bg-blue-500 disabled:bg-surface-border disabled:text-slate-500 text-white text-sm font-semibold px-6 py-2.5 rounded-lg transition shrink-0">Analyze</button>
       </div>
       <div id="error-box" class="mt-2 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-md px-3 py-2" hidden></div>
       <div id="loading-box" class="mt-2 text-xs text-slate-400 font-mono" hidden><i class="fa-solid fa-circle-notch fa-spin mr-2"></i><span id="loading-text">Reading files</span></div>
@@ -129,6 +132,7 @@
             <button class="cat-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="security">Security</button>
             <button class="cat-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="quality">Quality</button>
             <button class="cat-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="errors">Parse errors</button>
+            <button class="cat-btn px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-card text-slate-400 border border-surface-border" data-value="files">Files</button>
           </div>
           <div class="flex flex-wrap gap-1.5" id="filter-severity">
             <button class="sev-btn active px-2.5 py-1 rounded-full text-[11px] font-medium bg-surface-hover text-slate-200 border border-surface-border" data-value="all">All severities</button>
@@ -147,7 +151,16 @@
           <span id="viewer-filename" class="text-xs font-mono text-slate-300">No file selected</span>
         </div>
         <div class="flex-1 overflow-auto font-mono text-xs leading-6 p-4" id="code-viewport">
-          <div class="text-slate-600 text-center mt-10">Run a scan, then click an issue to view its source.</div>
+          <div class="text-slate-600 text-center mt-10 font-sans max-w-xs mx-auto space-y-2">
+            <i class="fa-solid fa-shield-halved text-2xl text-accent-blue/60"></i>
+            <p class="font-semibold text-slate-400">Upload a project to scan for:</p>
+            <ul class="text-left text-[11px] space-y-1 text-slate-500">
+              <li>• Hardcoded secrets &amp; unsafe crypto</li>
+              <li>• Injection &amp; deserialization risks</li>
+              <li>• Complexity, nesting &amp; long functions</li>
+              <li>• Duplicate code &amp; unused imports</li>
+            </ul>
+          </div>
         </div>
         <div class="h-8 bg-surface-panel border-t border-surface-border px-4 flex items-center justify-between text-[11px] font-mono text-slate-500 shrink-0">
           <div class="flex items-center space-x-4">
